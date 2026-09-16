@@ -6,7 +6,7 @@ import 'pressable.dart';
 
 /// Сегментный переключатель с «гусеницей»: передний край плашки едет 200ms,
 /// задний 350ms (OutExpo), поэтому плашка сначала тянется, потом подтягивает хвост.
-/// Стрелки ←/→ переключают выбор.
+/// В обход Tab попадает только выбранный сегмент; ←/→, Home/End двигают выбор.
 class Segmented<T> extends StatefulWidget {
   const Segmented({super.key, required this.items, required this.value, required this.onChanged, this.label});
 
@@ -76,13 +76,15 @@ class _SegmentedState<T> extends State<Segmented<T>> with TickerProviderStateMix
 
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
     if (e is KeyUpEvent) return KeyEventResult.ignored;
-    final d = switch (e.logicalKey) {
-      LogicalKeyboardKey.arrowLeft => -1,
-      LogicalKeyboardKey.arrowRight => 1,
-      _ => 0,
-    };
-    if (d == 0) return KeyEventResult.ignored;
-    final i = (_index + d).clamp(0, widget.items.length - 1);
+    final last = widget.items.length - 1;
+    final i = switch (e.logicalKey) {
+      LogicalKeyboardKey.arrowLeft => _index - 1,
+      LogicalKeyboardKey.arrowRight => _index + 1,
+      LogicalKeyboardKey.home => 0,
+      LogicalKeyboardKey.end => last,
+      _ => null,
+    }?.clamp(0, last);
+    if (i == null) return KeyEventResult.ignored;
     if (i != _index) widget.onChanged(widget.items[i].$1);
     _nodes[i].requestFocus();
     return KeyEventResult.handled;
@@ -91,6 +93,9 @@ class _SegmentedState<T> extends State<Segmented<T>> with TickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     final n = widget.items.length, sel = _index;
+    for (var i = 0; i < n; i++) {
+      _nodes[i].skipTraversal = i != sel; // одна остановка Tab на весь переключатель
+    }
     return Semantics(
       label: widget.label,
       container: true,

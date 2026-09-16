@@ -115,3 +115,40 @@ bool systemAnimationsEnabled() {
     calloc.free(v);
   }
 }
+
+final _createSnapshot = _kernel32.lookupFunction<IntPtr Function(Uint32, Uint32), int Function(int, int)>(
+  'CreateToolhelp32Snapshot',
+);
+final _process32First = _kernel32
+    .lookupFunction<Int32 Function(IntPtr, Pointer<Uint8>), int Function(int, Pointer<Uint8>)>('Process32FirstW');
+final _process32Next = _kernel32
+    .lookupFunction<Int32 Function(IntPtr, Pointer<Uint8>), int Function(int, Pointer<Uint8>)>('Process32NextW');
+
+/// Имена исполняемых файлов всех запущенных процессов (в нижнем регистре).
+/// PROCESSENTRY32W на x64: 568 байт, szExeFile (WCHAR[260]) со смещения 44.
+Set<String> runningProcessNames() {
+  const size = 568, nameAt = 44;
+  final snap = _createSnapshot(0x2 /* TH32CS_SNAPPROCESS */, 0);
+  if (snap == _invalidHandle) return {};
+  final entry = calloc<Uint8>(size);
+  final names = <String>{};
+  try {
+    entry.cast<Uint32>().value = size;
+    for (var ok = _process32First(snap, entry); ok != 0; ok = _process32Next(snap, entry)) {
+      names.add((entry + nameAt).cast<Utf16>().toDartString(length: _wcslen(entry + nameAt, 260)).toLowerCase());
+    }
+  } finally {
+    calloc.free(entry);
+    _closeHandle(snap);
+  }
+  return names;
+}
+
+int _wcslen(Pointer<Uint8> p, int max) {
+  final w = p.cast<Uint16>();
+  var n = 0;
+  while (n < max && w[n] != 0) {
+    n++;
+  }
+  return n;
+}

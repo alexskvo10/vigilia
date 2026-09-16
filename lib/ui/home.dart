@@ -1,21 +1,55 @@
-import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../controller.dart';
+import '../schedule.dart';
 import '../sounds.dart';
+import '../strings.dart';
 import '../theme.dart';
 import 'motion.dart';
 import 'orb.dart';
-import 'segmented.dart';
+import 'pages.dart';
 import 'settings_drawer.dart';
 import 'title_bar.dart';
-import 'toggle.dart';
 
-class Home extends StatefulWidget {
-  const Home({super.key, required this.c, required this.onHide});
+const appVersion = '1.1.0';
+
+/// Состояние интерфейса, которое переживает пересоздание экрана (смена цвета/языка).
+class UiState {
+  final settings = ValueNotifier(false); // панель настроек по умолчанию скрыта
+  final page = ValueNotifier(SettingsPage.mode);
+}
+
+/// Экран целиком. Смена цвета или языка пересоздаёт его с кроссфейдом:
+/// вся палитра и все тексты меняются разом, а открытая панель и раздел сохраняются.
+class VigiliaScreen extends StatelessWidget {
+  const VigiliaScreen({super.key, required this.c, required this.ui, required this.onHide});
 
   final VigilController c;
+  final UiState ui;
+  final VoidCallback onHide;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: c,
+    builder: (context, _) => AnimatedSwitcher(
+      duration: D.settle,
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      child: DefaultTextStyle(
+        key: ValueKey('${c.accent}/${S.current.code}'),
+        style: mono(12),
+        child: Home(c: c, ui: ui, onHide: onHide),
+      ),
+    ),
+  );
+}
+
+class Home extends StatefulWidget {
+  const Home({super.key, required this.c, required this.ui, required this.onHide});
+
+  final VigilController c;
+  final UiState ui;
   final VoidCallback onHide;
 
   @override
@@ -25,15 +59,31 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   static const _orbArea = 292.0, _statusArea = 60.0;
   final _pointer = ValueNotifier<Offset?>(null);
-  bool _settings = false; // настройки по умолчанию скрыты
+
+  UiState get ui => widget.ui;
 
   void _toggleSettings() {
     widget.c.sounds.play(Sfx.tick);
-    setState(() => _settings = !_settings);
+    ui.settings.value = !ui.settings.value;
+    if (!ui.settings.value && ui.page.value == SettingsPage.picker) ui.page.value = SettingsPage.mode;
   }
 
-  // Esc сначала закрывает настройки, потом прячет окно в трей
-  void _escape() => _settings ? _toggleSettings() : widget.onHide();
+  void _setPage(SettingsPage p) {
+    if (p == ui.page.value) return;
+    widget.c.sounds.play(Sfx.tick);
+    ui.page.value = p;
+  }
+
+  // Esc: выбор процесса → раздел «Режим» → закрыть настройки → спрятать окно
+  void _escape() {
+    if (ui.settings.value && ui.page.value == SettingsPage.picker) {
+      _setPage(SettingsPage.mode);
+    } else if (ui.settings.value) {
+      _toggleSettings();
+    } else {
+      widget.onHide();
+    }
+  }
 
   @override
   void dispose() {
@@ -52,7 +102,7 @@ class _HomeState extends State<Home> {
         child: ColoredBox(
           color: C.base,
           child: ListenableBuilder(
-            listenable: c,
+            listenable: Listenable.merge([c, ui.settings, ui.page]),
             builder: (context, _) => Stack(
               children: [
                 // мягкое акцентное свечение окна во включённом режиме
@@ -86,7 +136,7 @@ class _HomeState extends State<Home> {
                     Expanded(
                       child: LayoutBuilder(
                         builder: (context, box) {
-                          final scale = ((box.maxHeight - _statusArea) / _orbArea).clamp(0.55, 1.0);
+                          final scale = ((box.maxHeight - _statusArea) / _orbArea).clamp(0.4, 1.0);
                           return Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -98,18 +148,28 @@ class _HomeState extends State<Home> {
                                     maxHeight: 340,
                                     child: Transform.scale(
                                       scale: scale,
-                                      child: Orb(
-                                        active: c.active,
-                                        error: c.error,
-                                        progress: c.progress,
-                                        pointer: _pointer,
-                                        onTap: c.toggle,
+                                      // кольцо таймера двигается раз в секунду — пересобираем только орб
+                                      child: ValueListenableBuilder(
+                                        valueListenable: c.clock,
+                                        builder: (context, _, _) => Orb(
+                                          active: c.active,
+                                          error: c.error,
+                                          progress: c.progress,
+                                          pointer: _pointer,
+                                          onTap: c.toggle,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                              Cascade(index: 1, child: _Status(c)),
+                              Cascade(
+                                index: 1,
+                                child: ValueListenableBuilder(
+                                  valueListenable: c.clock,
+                                  builder: (context, _, _) => Status(c),
+                                ),
+                              ),
                             ],
                           );
                         },
@@ -119,7 +179,11 @@ class _HomeState extends State<Home> {
                       index: 2,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: SettingsDrawer(open: _settings, onToggle: _toggleSettings, children: _settingsRows(c)),
+                        child: SettingsDrawer(
+                          open: ui.settings.value,
+                          onToggle: _toggleSettings,
+                          children: [SettingsPages(c: c, page: ui.page.value, onPage: _setPage)],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -128,7 +192,7 @@ class _HomeState extends State<Home> {
                       child: Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: Text(
-                          'v1.0.0 · пробел — вкл/выкл · esc — в трей',
+                          S.current.footer(appVersion),
                           style: mono(10, weight: FontWeight.w500, color: C.overlay0),
                         ),
                       ),
@@ -142,67 +206,54 @@ class _HomeState extends State<Home> {
       ),
     );
   }
-
-  List<Widget> _settingsRows(VigilController c) => [
-    const _Label(Icons.desktop_windows_rounded, 'ЭКРАН'),
-    Segmented<bool>(
-      label: 'Экран',
-      items: const [(false, 'Может гаснуть'), (true, 'Не гаснет')],
-      value: c.keepDisplay,
-      onChanged: c.setKeepDisplay,
-    ),
-    const SizedBox(height: 12),
-    const _Label(Icons.timer_outlined, 'ТАЙМЕР'),
-    Segmented<int>(
-      label: 'Таймер',
-      items: [for (final m in timerPresets) (m, _preset(m))],
-      value: c.timerMinutes,
-      onChanged: c.setTimer,
-    ),
-    Container(height: 1, margin: const EdgeInsets.fromLTRB(2, 12, 2, 4), color: C.hairline),
-    Toggle(icon: Icons.rocket_launch_rounded, label: 'Запуск с Windows', value: c.autostart, onChanged: c.setAutostart),
-    Toggle(
-      icon: c.soundsOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-      label: 'Звуки',
-      value: c.soundsOn,
-      onChanged: c.setSounds,
-    ),
-  ];
 }
 
-String _preset(int m) => m == 0 ? '∞' : (m < 60 ? '$mм' : '${m ~/ 60}ч');
-
-String _clock(Duration d) {
-  String two(int v) => v.toString().padLeft(2, '0');
+String clockText(Duration d) {
   final h = d.inHours, m = d.inMinutes % 60, s = d.inSeconds % 60;
   return h > 0 ? '$h:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
 }
 
-class _Status extends StatelessWidget {
-  const _Status(this.c);
+String speedText(double bps, S s) =>
+    bps < 1024 * 1024 ? '${(bps / 1024).round()} ${s.kbs}' : '${(bps / 1024 / 1024).toStringAsFixed(1)} ${s.mbs}';
+
+/// Заголовок и подзаголовок под орбом.
+class Status extends StatelessWidget {
+  const Status(this.c, {super.key});
   final VigilController c;
+
+  /// (ключ для анимации смены, текст, предупреждение ли)
+  static (String, String, bool) subtitle(VigilController c, S s) {
+    final name = c.processName ?? '';
+    final quiet = c.quietLeft, speed = c.speed, left = c.remaining, end = c.endsAt, win = c.windowEnd;
+    if (c.error) return ('err', s.subError, false);
+    if (!c.active) {
+      return switch (c.notice) {
+        Notice.pickProcess => ('notice', s.pickProcessFirst, true),
+        Notice.notRunning => ('notice', s.notRunning(name), true),
+        Notice.none => ('off', s.subOff, false),
+      };
+    }
+    if (c.scheduled && win != null) return ('schedule', s.onSchedule(hhmm(win)), false);
+    if (left != null && end != null) return ('timer', s.left(clockText(left), hhmm(end)), false);
+    if (c.manual && c.until == Until.process) return ('process', s.whileRunning(name), false);
+    if (c.manual && c.until == Until.download) {
+      final idle = quiet != null && (speed == null || speed < downloadThreshold);
+      return idle
+          ? ('idle', s.downloadIdle(clockText(quiet)), false)
+          : ('download', s.download(speedText(speed ?? 0, s)), false);
+    }
+    return c.keepDisplay ? ('disp', s.subDisplay, false) : ('sys', s.subSystem, false);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final s = S.current;
     final (title, color) = c.error
-        ? ('Не получилось', C.danger)
+        ? (s.titleError, C.danger)
         : c.active
-        ? ('Не даю уснуть', C.text)
-        : ('Обычный сон', C.subtext0);
-
-    final remaining = c.remaining, end = c.endsAt;
-    final (kind, sub) = c.error
-        ? ('err', 'Windows отклонила запрос питания')
-        : !c.active
-        ? ('off', 'Компьютер уснёт по настройкам Windows')
-        : (remaining != null && end != null)
-        ? (
-            'timer',
-            'ещё ${_clock(remaining)} · до ${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}',
-          )
-        : c.keepDisplay
-        ? ('disp', 'Система и экран не уснут')
-        : ('sys', 'Система не уснёт, экран может погаснуть');
+        ? (s.titleOn, C.text)
+        : (s.titleOff, C.subtext0);
+    final (kind, sub, warn) = subtitle(c, s);
 
     return SizedBox(
       height: 52,
@@ -220,29 +271,11 @@ class _Status extends StatelessWidget {
               key: ValueKey(kind),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: mono(11, weight: FontWeight.w500, color: C.subtext0),
+              style: mono(11, weight: FontWeight.w500, color: warn ? C.warning : C.subtext0),
             ),
           ),
         ],
       ),
     );
   }
-}
-
-class _Label extends StatelessWidget {
-  const _Label(this.icon, this.text);
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(left: 2, bottom: 8),
-    child: Row(
-      children: [
-        Icon(icon, size: 13, color: C.overlay0),
-        const SizedBox(width: 6),
-        Text(text, style: mono(10, color: C.subtext0, spacing: 1.2)),
-      ],
-    ),
-  );
 }

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
+import '../strings.dart';
 import '../theme.dart';
 import 'pressable.dart';
 
@@ -198,7 +199,7 @@ class _OrbState extends State<Orb> with TickerProviderStateMixin {
             pressScale: 0.96,
             autofocus: true,
             toggled: widget.active,
-            semanticLabel: widget.active ? 'Выключить режим «не спать»' : 'Включить режим «не спать»',
+            semanticLabel: widget.active ? S.current.orbOff : S.current.orbOn,
             onTap: widget.onTap,
             builder: (context, hovered, _) => TweenAnimationBuilder<double>(
               tween: Tween(end: hovered ? 1 : 0),
@@ -379,7 +380,7 @@ class _HaloPainter extends CustomPainter {
   final double radius;
   final bool active, still;
 
-  static final _z = TextPainter(
+  late final _z = TextPainter(
     text: TextSpan(
       text: 'z',
       style: mono(16, weight: FontWeight.w800, color: C.subtext0),

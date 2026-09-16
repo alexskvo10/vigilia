@@ -2,6 +2,7 @@ import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/widgets.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../strings.dart';
 import '../theme.dart';
 import 'pressable.dart';
 
@@ -24,16 +25,16 @@ class TitleBar extends StatelessWidget {
               child: Row(
                 children: [
                   const SizedBox(width: 16),
-                  const Icon(Icons.visibility_rounded, size: 15, color: C.accent),
+                  Icon(Icons.visibility_rounded, size: 15, color: C.accent),
                   const SizedBox(width: 8),
                   Text('VIGILIA', style: mono(12, spacing: 1.5)),
                 ],
               ),
             ),
           ),
-          _BarButton(icon: Icons.remove_rounded, label: 'Свернуть', onTap: windowManager.minimize),
+          _BarButton(icon: Icons.remove_rounded, label: S.current.minimize, onTap: windowManager.minimize),
           const SizedBox(width: 4),
-          _BarButton(icon: Icons.close_rounded, label: 'Спрятать в трей', onTap: onHide, danger: true),
+          _BarButton(icon: Icons.close_rounded, label: S.current.hideToTray, onTap: onHide, danger: true),
           const SizedBox(width: 8),
         ],
       ),

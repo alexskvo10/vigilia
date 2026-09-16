@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/widgets.dart';
 
+import '../strings.dart';
 import '../theme.dart';
 import 'motion.dart';
 import 'pressable.dart';
@@ -145,7 +146,7 @@ class _SettingsDrawerState extends State<SettingsDrawer> with SingleTickerProvid
         popDown: 400,
         pressScale: 0.97,
         toggled: open,
-        semanticLabel: open ? 'Скрыть настройки' : 'Настройки',
+        semanticLabel: open ? S.current.hide : S.current.settings,
         onTap: widget.onToggle,
         builder: (context, hovered, _) => AnimatedContainer(
           duration: D.color,
@@ -177,13 +178,16 @@ class _SettingsDrawerState extends State<SettingsDrawer> with SingleTickerProvid
               Expanded(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Letters(open ? 'Скрыть' : 'Настройки', style: mono(12, color: open ? C.text : C.subtext0)),
+                  child: Letters(
+                    open ? S.current.hide : S.current.settings,
+                    style: mono(12, color: open ? C.text : C.subtext0),
+                  ),
                 ),
               ),
               const SizedBox(width: 4),
               Transform.rotate(
                 angle: math.pi * (1 - p),
-                child: const Icon(Icons.expand_more_rounded, size: 16, color: C.overlay0),
+                child: Icon(Icons.expand_more_rounded, size: 16, color: C.overlay0),
               ),
             ],
           ),
@@ -241,7 +245,7 @@ class _DrawerPainter extends CustomPainter {
   _DrawerPainter({required this.p, required this.panelW, required this.tabW, required this.tabH});
   final double p, panelW, tabW, tabH;
 
-  static final _fill = Color.alphaBlend(C.surface0.withValues(alpha: 0.6), C.base);
+  Color get _fill => Color.alphaBlend(C.surface0.withValues(alpha: 0.6), C.base);
 
   @override
   void paint(Canvas canvas, Size size) {

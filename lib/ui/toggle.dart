@@ -6,9 +6,19 @@ import 'pressable.dart';
 /// Строка-переключатель: подпись слева, трек 44×24 справа.
 /// Ручка 18×18 едет 200ms OutBack(1.2); кликабельна вся строка.
 class Toggle extends StatelessWidget {
-  const Toggle({super.key, required this.label, required this.value, required this.onChanged, this.icon});
+  const Toggle({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    this.icon,
+    this.hint,
+    this.warn = false,
+  });
 
   final String label;
+  final String? hint; // мелкая подпись под названием
+  final bool warn; // подпись — предупреждение
   final IconData? icon;
   final bool value;
   final ValueChanged<bool> onChanged;
@@ -42,7 +52,20 @@ class Toggle extends StatelessWidget {
               const SizedBox(width: 10),
             ],
             Expanded(
-              child: Text(label, style: mono(12, color: value ? C.text : C.subtext0)),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: mono(12, color: value ? C.text : C.subtext0)),
+                  if (hint != null)
+                    Text(
+                      hint!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: mono(9.5, weight: FontWeight.w500, color: warn ? C.warning : C.overlay0),
+                    ),
+                ],
+              ),
             ),
             AnimatedScale(
               scale: hovered && !still ? 1.04 : 1,

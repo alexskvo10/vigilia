@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.vigilia" "\0"
-            VALUE "FileDescription", "vigilia" "\0"
+            VALUE "CompanyName", "alexskvo10" "\0"
+            VALUE "FileDescription", "Vigilia" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "vigilia" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.vigilia. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Alex Skvortsov. MIT License." "\0"
             VALUE "OriginalFilename", "vigilia.exe" "\0"
-            VALUE "ProductName", "vigilia" "\0"
+            VALUE "ProductName", "Vigilia" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

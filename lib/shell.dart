@@ -2,13 +2,16 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
-import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'controller.dart';
+import 'native.dart';
+import 'schedule.dart';
+import 'strings.dart';
 
 /// Трей и окно: крестик прячет окно в трей, режим продолжает работать.
-class Shell with TrayListener, WindowListener {
+/// Когда условие закончилось, а окно скрыто, — уведомление Windows.
+class Shell with WindowListener {
   Shell(this.c);
 
   final VigilController c;
@@ -20,8 +23,9 @@ class Shell with TrayListener, WindowListener {
   Future<void> _queue = Future.value();
 
   Future<void> init({required bool hidden}) async {
-    trayManager.addListener(this);
     windowManager.addListener(this);
+    Native.listen(onTrayClick: _trayClick, onMenu: _menu, onHotkey: _hotkey);
+    c.onFinished = _finished;
     await windowManager.setPreventClose(true);
     c.addListener(_sync);
     _sync();
@@ -34,40 +38,50 @@ class Shell with TrayListener, WindowListener {
     }
   }
 
-  // Тик таймера каждую секунду трей не трогает: применяем только реальные изменения.
+  /// Текст подсказки трея. Тик таймера трей не трогает: применяем только реальные изменения.
+  @visibleForTesting
+  static String tooltip(VigilController c, S s) {
+    if (c.error) return s.trayError;
+    if (!c.active) return s.trayOff;
+    final end = c.endsAt ?? (c.scheduled ? c.windowEnd : null);
+    return '${s.trayOn}${end == null ? '' : s.until(hhmm(end))}${c.keepDisplay ? s.trayDisplay : ''}';
+  }
+
   void _sync() {
-    final end = c.endsAt;
-    final hhmm = end == null
-        ? ''
-        : ' до ${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
-    final tip = c.error
-        ? 'Vigilia — ошибка запроса питания'
-        : c.active
-        ? 'Vigilia — не даю уснуть$hhmm${c.keepDisplay ? ' · экран включён' : ''}'
-        : 'Vigilia — обычный сон';
-    final key = '${c.active}|$tip';
+    final s = S.current;
+    final tip = tooltip(c, s);
+    final key = '${c.active}|${s.code}|$tip';
     if (key == _applied) return;
     _applied = key;
-    final active = c.active;
+    final on = c.active;
     // последовательно, чтобы быстрые переключения не перемешали вызовы
-    _queue = _queue.then((_) async {
-      try {
-        await trayManager.setIcon(active ? 'assets/tray_on.ico' : 'assets/tray_off.ico');
-        await trayManager.setToolTip(tip);
-        await trayManager.setContextMenu(
-          Menu(
-            items: [
-              MenuItem(key: 'toggle', label: active ? 'Выключить' : 'Включить'),
-              MenuItem(key: 'show', label: 'Показать окно'),
-              MenuItem.separator(),
-              MenuItem(key: 'quit', label: 'Выход'),
-            ],
-          ),
-        );
-      } catch (e) {
-        debugPrint('tray: $e');
-      }
-    });
+    _queue = _queue.then(
+      (_) => Native.setTray(
+        on: on,
+        tooltip: tip,
+        toggle: on ? s.trayTurnOff : s.trayTurnOn,
+        show: s.trayShow,
+        quit: s.trayQuit,
+      ),
+    );
+  }
+
+  void _finished(Finish reason, String? detail) {
+    if (visible.value) return; // окно перед глазами — хватает звука и статуса
+    final s = S.current;
+    final body = switch (reason) {
+      Finish.timer => s.doneTimer,
+      Finish.process => s.doneProcess(detail ?? ''),
+      Finish.download => s.doneDownload,
+      Finish.schedule => s.doneSchedule,
+    };
+    unawaited(Native.notify('Vigilia', body));
+  }
+
+  void _hotkey() {
+    c.toggle();
+    // при скрытом окне без обратной связи непонятно, что произошло
+    if (!visible.value) unawaited(Native.notify('Vigilia', c.active ? S.current.toggledOn : S.current.toggledOff));
   }
 
   Future<void> show() async {
@@ -85,10 +99,10 @@ class Shell with TrayListener, WindowListener {
   Future<void> quit() async {
     c.removeListener(_sync);
     c.dispose(); // снимает запрос питания
-    trayManager.removeListener(this);
     windowManager.removeListener(this);
     try {
-      await trayManager.destroy();
+      await Native.removeTray();
+      await Native.setHotkey(false);
       await windowManager.setPreventClose(false);
       await windowManager.destroy();
     } finally {
@@ -96,18 +110,17 @@ class Shell with TrayListener, WindowListener {
     }
   }
 
-  @override
-  void onTrayIconMouseDown() async {
+  Future<void> _trayClick() async {
     final shown = await windowManager.isVisible() && visible.value;
-    shown ? hide() : show();
+    if (shown) {
+      await hide();
+    } else {
+      await show();
+    }
   }
 
-  @override
-  void onTrayIconRightMouseDown() => trayManager.popUpContextMenu();
-
-  @override
-  void onTrayMenuItemClick(MenuItem menuItem) {
-    switch (menuItem.key) {
+  void _menu(String id) {
+    switch (id) {
       case 'toggle':
         c.toggle();
       case 'show':

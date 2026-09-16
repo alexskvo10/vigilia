@@ -2,21 +2,56 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
-/// Токены дизайна: Catppuccin Mocha с фиолетовым подтоном
-/// во всех слоях и одним акцентом.
+/// Варианты акцента (цвета Catppuccin Mocha).
+const accentPresets = [
+  Color(0xFFCBA6F7),
+  Color(0xFF89B4FA),
+  Color(0xFF94E2D5),
+  Color(0xFFA6E3A1),
+  Color(0xFFFAB387),
+  Color(0xFFF5C2E7),
+];
+
+/// Палитра из акцента: оттенок акцента подмешан во все тёмные слои,
+/// поэтому интерфейс выглядит цельным, а не «серым с цветной кнопкой».
+class Palette {
+  Palette(this.accent) {
+    final h = (HSLColor.fromColor(accent).hue - 7) % 360;
+    Color hsl(double s, double l) => HSLColor.fromAHSL(1, h, s, l).toColor();
+    crust = hsl(0.257, 0.069);
+    mantle = hsl(0.25, 0.094);
+    base = hsl(0.246, 0.12);
+    surface0 = hsl(0.217, 0.18);
+    surface1 = hsl(0.197, 0.239);
+    surface2 = hsl(0.178, 0.32);
+    overlay0 = hsl(0.123, 0.461);
+    text = hsl(0.556, 0.912);
+    subtext0 = hsl(0.208, 0.688);
+  }
+
+  final Color accent;
+  late final Color crust, mantle, base, surface0, surface1, surface2, overlay0, text, subtext0;
+}
+
+/// Токены цвета. Палитра меняется целиком при смене акцента
+/// (экран при этом пересоздаётся с кроссфейдом, см. VigiliaApp).
 abstract final class C {
-  static const crust = Color(0xFF100D16);
-  static const mantle = Color(0xFF16121E);
-  static const base = Color(0xFF1C1726);
-  static const surface0 = Color(0xFF2B2438);
-  static const surface1 = Color(0xFF3A3149);
-  static const surface2 = Color(0xFF4D4360);
-  static const overlay0 = Color(0xFF6F6784);
-  static const text = Color(0xFFE6DCF5);
-  static const subtext0 = Color(0xFFAA9FC0);
-  static const accent = Color(0xFFCBA6F7);
-  static const onAccent = crust;
+  static Palette _p = Palette(accentPresets.first);
+  static void use(Color accent) => _p = Palette(accent);
+
+  static Color get crust => _p.crust;
+  static Color get mantle => _p.mantle;
+  static Color get base => _p.base;
+  static Color get surface0 => _p.surface0;
+  static Color get surface1 => _p.surface1;
+  static Color get surface2 => _p.surface2;
+  static Color get overlay0 => _p.overlay0;
+  static Color get text => _p.text;
+  static Color get subtext0 => _p.subtext0;
+  static Color get accent => _p.accent;
+  static Color get onAccent => _p.crust;
   static const danger = Color(0xFFF38BA8);
+  static const warning = Color(0xFFFAB387);
   static const flash = Color(0xFFFFFFFF);
   static const hairline = Color(0x1AFFFFFF); // белый 10%
 }
@@ -36,16 +71,15 @@ const double kRadius = 10;
 const String kFont = 'Cascadia Mono';
 const List<String> kFontFallback = ['Consolas', 'monospace'];
 
-TextStyle mono(double size, {FontWeight weight = FontWeight.w700, Color color = C.text, double spacing = 0}) =>
-    TextStyle(
-      fontFamily: kFont,
-      fontFamilyFallback: kFontFallback,
-      fontSize: size,
-      fontWeight: weight,
-      color: color,
-      letterSpacing: spacing,
-      height: 1.2,
-    );
+TextStyle mono(double size, {FontWeight weight = FontWeight.w700, Color? color, double spacing = 0}) => TextStyle(
+  fontFamily: kFont,
+  fontFamilyFallback: kFontFallback,
+  fontSize: size,
+  fontWeight: weight,
+  color: color ?? C.text,
+  letterSpacing: spacing,
+  height: 1.2,
+);
 
 /// Qt OutBack с настраиваемым перелётом `s`.
 class OutBack extends Curve {

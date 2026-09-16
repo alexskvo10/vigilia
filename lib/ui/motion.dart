@@ -97,9 +97,14 @@ class Cascade extends StatefulWidget {
 
   @override
   State<Cascade> createState() => _CascadeState();
+
+  static void finishIntro() => _CascadeState.introDone = true;
 }
 
 class _CascadeState extends State<Cascade> with SingleTickerProviderStateMixin {
+  /// После первого показа экрана каскад не повторяется (например, при смене цвета или языка).
+  static bool introDone = false;
+
   late final int _delay = widget.index * 50 + 100;
   late final AnimationController _c;
 
@@ -110,7 +115,8 @@ class _CascadeState extends State<Cascade> with SingleTickerProviderStateMixin {
     _c = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: _delay + 650),
-    )..forward();
+    );
+    introDone ? _c.value = 1 : _c.forward();
   }
 
   @override

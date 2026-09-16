@@ -2,11 +2,13 @@ import 'package:flutter/widgets.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'controller.dart';
+import 'native.dart';
 import 'settings.dart';
 import 'shell.dart';
 import 'sounds.dart';
 import 'theme.dart';
 import 'ui/home.dart';
+import 'ui/motion.dart';
 import 'ui/pressable.dart';
 import 'win32.dart';
 
@@ -23,11 +25,12 @@ Future<void> main(List<String> args) async {
     sounds: Sounds(),
     store: SettingsStore.appData(),
     autostartService: Autostart(),
+    registerHotkey: Native.setHotkey,
   )..load();
   final shell = Shell(c);
 
   await windowManager.waitUntilReadyToShow(
-    const WindowOptions(
+    WindowOptions(
       size: kWindowSize,
       minimumSize: kWindowSize,
       maximumSize: kWindowSize,
@@ -44,24 +47,38 @@ Future<void> main(List<String> args) async {
   await shell.init(hidden: args.contains('--hidden'));
 }
 
-class VigiliaApp extends StatelessWidget {
+class VigiliaApp extends StatefulWidget {
   const VigiliaApp({super.key, required this.c, required this.shell});
 
   final VigilController c;
   final Shell shell;
 
   @override
+  State<VigiliaApp> createState() => _VigiliaAppState();
+}
+
+class _VigiliaAppState extends State<VigiliaApp> {
+  final _ui = UiState();
+
+  @override
+  void initState() {
+    super.initState();
+    // стартовый каскад играет один раз; при смене цвета/языка экран появляется без него
+    Future.delayed(const Duration(milliseconds: 1200), Cascade.finishIntro);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final c = widget.c;
     return WidgetsApp(
       title: 'Vigilia',
-      color: C.accent,
+      color: accentPresets.first,
       debugShowCheckedModeBanner: false,
-      textStyle: mono(12),
       builder: (context, _) => ValueListenableBuilder<bool>(
-        valueListenable: shell.visible,
+        valueListenable: widget.shell.visible,
         // окно скрыто — анимации на паузе, CPU не тратится
         builder: (context, visible, child) => TickerMode(enabled: visible, child: child!),
-        child: Home(c: c, onHide: shell.hide),
+        child: VigiliaScreen(c: c, ui: _ui, onHide: widget.shell.hide),
       ),
     );
   }

@@ -138,18 +138,23 @@ class _SettingsDrawerState extends State<SettingsDrawer> with SingleTickerProvid
       child: Pressable(
         focusNode: _tabFocus,
         radius: BorderRadius.circular(_tabH / 2),
-        hoverScale: 1.02,
+        // форму кнопки рисует панель и она не масштабируется, поэтому содержимое
+        // не должно выходить наружу: без увеличения на hover, клик — сжатие внутрь
+        pop: 0.96,
+        popUp: 110,
+        popDown: 400,
         pressScale: 0.97,
         toggled: open,
         semanticLabel: open ? 'Скрыть настройки' : 'Настройки',
         onTap: widget.onToggle,
         builder: (context, hovered, _) => AnimatedContainer(
           duration: D.color,
+          margin: const EdgeInsets.all(3),
           decoration: BoxDecoration(
             color: C.text.withValues(alpha: hovered ? 0.07 : 0),
             borderRadius: BorderRadius.circular(_tabH / 2),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 11),
           child: Row(
             children: [
               // шестерёнка проворачивается на пол-оборота с пружинкой

@@ -133,6 +133,9 @@ class _PressableState extends State<Pressable> with TickerProviderStateMixin {
               duration: D.base,
               curve: Curves.easeOutQuint,
               child: Stack(
+                // размеры родителя проходят к содержимому как есть: иначе оно сжимается
+                // до своей высоты и прилипает к верху (была кривая кнопка «Настройки»)
+                fit: StackFit.passthrough,
                 clipBehavior: Clip.none,
                 children: [
                   widget.builder(context, _hovered, _pressed),

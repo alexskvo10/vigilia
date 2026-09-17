@@ -1,50 +1,52 @@
 <p align="center"><img src="docs/header.png" alt="Vigilia"></p>
 
-Маленькое приложение для Windows, которое не даёт компьютеру уснуть. Главная кнопка — глаз: закрыт — обычный сон, открыт — компьютер бодрствует. Интерфейс на русском и английском.
+<p align="center"><b>English</b> · <a href="README.ru.md">Русский</a></p>
 
-![Vigilia: таймер, «Режим» с загрузкой, «Расписание», «Система» с кнопкой обновления](docs/screenshot.png)
+A small Windows app that keeps your computer awake. The main button is an eye: closed means normal sleep, open means the computer stays awake. The interface is in English and Russian.
 
-## Возможности
+![Vigilia: timer, Mode with download, Schedule, System with the update button](docs/screenshot.png)
 
-- **Вкл/выкл** кликом по глазу, пробелом или глобальной клавишей (по умолчанию **Ctrl+Alt+V**, можно назначить свою; работает, даже когда окно спрятано). Используется Windows Power Request API с причиной «Vigilia: режим «не спать» включён» (её показывает `powercfg /requests`, команде нужны права администратора). Если процесс завершится, Windows снимет запрос сама.
-- **Настройки скрыты** за кнопкой «Настройки» внизу окна: по нажатию из неё «вырастает» панель с разделами «Режим», «Расписание», «Общие», «Система».
-- **Экран:** «Может гаснуть» (не спит только система) или «Не гаснет» (система и дисплей).
-- **До каких пор:**
-  - **всегда** — пока не выключишь;
-  - **таймер** — 30 минут, 1, 2 или 4 часа, с кольцом прогресса вокруг кнопки;
-  - **процесс** — пока работает хотя бы одна из выбранных программ (до 10: игра, рендер, установка). Программы выбираются из списка запущенных с поиском и сравниваются по пути к exe, поэтому одноимённые программы из разных папок не путаются;
-  - **загрузка** — пока скорость не опустится ниже порога (50 КБ/с – 1 МБ/с) на 2 минуты подряд. Считаются все физические адаптеры или один выбранный (например, VPN).
-- **Расписание:** дни недели и интервал «с — до» с шагом 30 минут, в том числе через полночь. Если выключить режим вручную во время интервала, текущий интервал пропускается, а следующий сработает как обычно. Пока режим выключен, под глазом видно, когда начнётся ближайший интервал.
-- **Уведомления Windows**, когда режим выключился сам (таймер, процесс, загрузка, конец расписания) или его переключили горячей клавишей, а окно при этом спрятано.
-- **Трей:** × и Esc прячут окно, режим продолжает работать. Иконка в трее — в цвете интерфейса. Левый клик по иконке открывает или прячет окно, правый — меню «Включить/Выключить · Показать окно · Выход».
-- **Общие:** цвет интерфейса (6 вариантов, тёмные слои подстраиваются под акцент), язык RU/EN (по умолчанию — язык системы), звуки.
-- **Система:** горячая клавиша (клик по клавишам — запись нового сочетания), запуск с Windows, обновления.
-- **Обновления:** проверка на GitHub Releases при старте и раз в 12 часов (можно выключить). Чтобы обновиться, кнопку нужно удерживать: Vigilia скачает установщик, сверит размер и SHA-256, закроется, а установщик поставит новую версию и запустит её. Портативная копия вместо этого открывает страницу релиза.
-- Запоминает настройки. Режим «всегда» восстанавливается после перезапуска. Если приложение переместили или переустановили, путь автозапуска обновится сам.
-- Работает только одна копия: повторный запуск показывает уже открытое окно.
-- Учитывает настройку Windows «Эффекты анимации»: если она выключена, остаются только смены цвета, плавные проявления и вспышка.
-- **Управление с клавиатуры:**
-  - Tab — по одному переходу на каждый переключатель;
-  - ←/→ и Home/End меняют значение внутри переключателя;
-  - пробел и Enter нажимают;
-  - кнопку обновления можно удерживать пробелом или Enter;
-  - Esc по очереди закрывает список процессов или адаптеров, затем панель, затем прячет окно.
+## Features
 
-Дизайн: Catppuccin Mocha с подтоном акцента, моноширинный шрифт, «тройной отклик» на клик, переключатель-«гусеница», OutBack-пружинки. Звуки синтезируются в приложении.
+- **On/off** by clicking the eye, pressing Space, or a global hotkey (**Ctrl+Alt+V** by default, can be changed; works even when the window is hidden). Uses the Windows Power Request API with the reason "Vigilia: режим «не спать» включён" ("stay-awake mode is on", shown by `powercfg /requests`, which needs admin rights). If the process exits, Windows drops the request by itself.
+- **Settings are tucked away** behind the Settings button at the bottom of the window: pressing it grows a panel with Mode, Schedule, General and System tabs.
+- **Display:** "May turn off" (only the system stays awake) or "Stays on" (system and display).
+- **Until:**
+  - **always** — until you turn it off;
+  - **timer** — 30 minutes, 1, 2 or 4 hours, with a progress ring around the button;
+  - **process** — while at least one of the selected programs is running (up to 10: a game, a render, an install). Programs are picked from a searchable list of running ones and matched by exe path, so same-named programs from different folders don't get mixed up;
+  - **download** — until the speed stays below a threshold (50 KB/s – 1 MB/s) for 2 minutes straight. Counts all physical adapters or a single selected one (for example, a VPN).
+- **Schedule:** weekdays and a "from — to" range in 30-minute steps, overnight ranges included. If you turn the mode off by hand during a range, the current range is skipped and the next one starts as usual. While the mode is off, the time of the next range is shown under the eye.
+- **Windows notifications** when the mode turned off by itself (timer, process, download, end of schedule) or was toggled by the hotkey while the window was hidden.
+- **Tray:** × and Esc hide the window, the mode keeps working. The tray icon matches the interface color. Left click on the icon shows or hides the window, right click opens a menu: Turn on/Turn off · Show window · Quit.
+- **General:** interface color (6 options, dark layers are tinted to match the accent), language EN/RU (system language by default), sounds.
+- **System:** global hotkey (click the keys to record a new combination), start with Windows, updates.
+- **Updates:** checks GitHub Releases at startup and every 12 hours (can be turned off). To update, hold the button: Vigilia downloads the installer, verifies its size and SHA-256, closes, and the installer puts the new version in place and starts it. A portable copy opens the release page instead.
+- Remembers settings. The "always" mode is restored after a restart. If the app is moved or reinstalled, the autostart path updates itself.
+- Only one copy runs: launching it again shows the window that is already open.
+- Respects the Windows "Animation effects" setting: when it is off, only color changes, fades and the flash remain.
+- **Keyboard control:**
+  - Tab — one stop per switch;
+  - ←/→ and Home/End change the value inside a switch;
+  - Space and Enter press;
+  - the update button can be held with Space or Enter;
+  - Esc closes, in order, the process or adapter list, then the panel, then hides the window.
 
-## Установка
+Design: Catppuccin Mocha tinted by the accent, a monospace font, a "triple response" on click, a "caterpillar" switch, OutBack springs. Sounds are synthesized inside the app.
 
-Скачай `Vigilia-<версия>-setup.exe` со страницы [Releases](https://github.com/alexskvo10/vigilia/releases). Установщик:
-- ставит приложение для текущего пользователя, права администратора не нужны;
-- создаёт ярлык в меню «Пуск»;
-- по желанию включает автозапуск;
-- при удалении убирает автозапуск.
+## Install
 
-Файлы не подписаны, поэтому при первом запуске Windows SmartScreen может показать предупреждение: «Подробнее» → «Выполнить в любом случае».
+Download `Vigilia-<version>-setup.exe` from the [Releases](https://github.com/alexskvo10/vigilia/releases) page. The installer:
+- installs the app for the current user, no admin rights needed;
+- adds a Start menu shortcut;
+- optionally enables start with Windows;
+- removes autostart on uninstall.
 
-## Сборка
+The files are not signed, so on first launch Windows SmartScreen may show a warning: "More info" → "Run anyway".
 
-Нужны Flutter (проверено на 3.41.7) и Visual Studio с «Desktop development with C++».
+## Build
+
+You need Flutter (tested on 3.41.7) and Visual Studio with "Desktop development with C++".
 
 ```bash
 flutter pub get
@@ -52,9 +54,9 @@ flutter test
 flutter build windows --release
 ```
 
-Результат: `build/windows/x64/runner/Release/` (запускать `vigilia.exe` вместе со всей папкой).
+Output: `build/windows/x64/runner/Release/` (run `vigilia.exe` together with the whole folder).
 
-Тесты нативной части (трей, горячая клавиша) собираются после Release-сборки через CMake из Visual Studio:
+Native tests (tray, hotkey) are built after the Release build with CMake from Visual Studio:
 
 ```bash
 cmake -S windows/runner/test -B build/native_test
@@ -66,51 +68,51 @@ cmake --build build/native_test --config Release
 ctest --test-dir build/native_test -C Release --output-on-failure
 ```
 
-Установщик собирается [Inno Setup 6](https://jrsoftware.org/isinfo.php) после Release-сборки:
+The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php) after the Release build:
 
 ```bash
 iscc installer/vigilia.iss
 ```
 
-Результат — `build/installer/Vigilia-<версия>-setup.exe`. В GitHub Actions ([build.yml](.github/workflows/build.yml)) анализ, тесты Dart и C++ и сборка идут на каждый пуш в `main`. Установщик собирается при ручном запуске workflow, а на тегах `v*` ещё и прикрепляется к релизу.
+Output: `build/installer/Vigilia-<version>-setup.exe`. In GitHub Actions ([build.yml](.github/workflows/build.yml)) analysis, Dart and C++ tests and the build run on every push to `main`. The installer is built on a manual workflow run, and on `v*` tags it is also attached to the release.
 
-Иконки трея для всех цветов генерируются скриптом (нужен Pillow); с `--app` — ещё и иконка приложения:
+Tray icons for all colors are generated by a script (needs Pillow); with `--app` it also generates the app icon:
 
 ```bash
 python tool/make_icons.py
 ```
 
-## Где что лежит
+## Project layout
 
-| Файл | Что делает |
+| File | What it does |
 |---|---|
-| `lib/main.dart` | запуск: окно, контроллер, трей |
-| `lib/controller.dart` | состояние и логика: вкл/выкл, экран, «до каких пор», расписание, настройки |
-| `lib/schedule.dart` | окна расписания |
-| `lib/probes.dart` | «какие программы запущены», адаптеры и скорость загрузки |
-| `lib/win32.dart` | WinAPI через `dart:ffi`: запрос питания, звук, процессы и их пути, счётчики адаптеров (`GetIfTable2`), «эффекты анимации» |
-| `lib/hotkey.dart` | сочетание глобальной клавиши |
-| `lib/updater.dart` | проверка и установка обновлений |
-| `lib/native.dart` | канал к нативной части: трей, уведомления, горячая клавиша |
-| `lib/strings.dart` | тексты RU/EN |
-| `lib/sounds.dart` | синтез звуков в WAV |
-| `lib/settings.dart` | `%APPDATA%\Vigilia\settings.json`, автозапуск (`HKCU\...\Run`) |
-| `lib/shell.dart` | трей, окно, уведомления |
-| `lib/theme.dart` | палитра из акцента, длительности, кривые, `lighter`/`darker` |
-| `lib/ui/` | экран и компоненты: орб, панель и разделы настроек, переключатели, toggle, запись сочетания, кнопка удержания, анимации текста |
-| `windows/runner/native_shell.cpp` | трей, меню, уведомления, `RegisterHotKey` |
-| `windows/runner/main.cpp` | одна копия приложения |
-| `windows/runner/test/` | тесты нативной части |
-| `installer/vigilia.iss` | установщик |
+| `lib/main.dart` | startup: window, controller, tray |
+| `lib/controller.dart` | state and logic: on/off, display, "until", schedule, settings |
+| `lib/schedule.dart` | schedule ranges |
+| `lib/probes.dart` | which programs are running, adapters and download speed |
+| `lib/win32.dart` | WinAPI via `dart:ffi`: power request, sound, processes and their paths, adapter counters (`GetIfTable2`), "animation effects" |
+| `lib/hotkey.dart` | global hotkey combination |
+| `lib/updater.dart` | checking for and installing updates |
+| `lib/native.dart` | channel to the native side: tray, notifications, hotkey |
+| `lib/strings.dart` | EN/RU texts |
+| `lib/sounds.dart` | sound synthesis to WAV |
+| `lib/settings.dart` | `%APPDATA%\Vigilia\settings.json`, autostart (`HKCU\...\Run`) |
+| `lib/shell.dart` | tray, window, notifications |
+| `lib/theme.dart` | palette from the accent, durations, curves, `lighter`/`darker` |
+| `lib/ui/` | screen and components: orb, settings panel and tabs, switches, toggle, hotkey recorder, hold button, text animations |
+| `windows/runner/native_shell.cpp` | tray, menu, notifications, `RegisterHotKey` |
+| `windows/runner/main.cpp` | single app instance |
+| `windows/runner/test/` | native tests |
+| `installer/vigilia.iss` | installer |
 
-## Ограничения
+## Limitations
 
-- Режим не даёт уснуть только от бездействия. Закрытие крышки ноутбука, кнопка питания и «Пуск → Спящий режим» работают как обычно: так устроен Power Request API.
-- Режим «загрузка» видит весь входящий трафик адаптера, а не одну загрузку: фоновые обновления тоже продлевают режим.
-- Если сочетание уже занято другой программой, переключатель клавиши покажет это и останется выключенным.
-- Для глобальной клавиши подходят буквы, цифры, F1–F24, стрелки, Home/End, PgUp/PgDn, Ins/Del, пробел и Pause вместе с Ctrl, Alt или Win.
-- Файлы не подписаны: автообновление проверяет размер и SHA-256 из GitHub, но не подпись.
+- The mode only prevents sleep caused by inactivity. Closing the laptop lid, the power button and Start → Sleep work as usual: that is how the Power Request API works.
+- The download mode sees all incoming traffic on the adapter, not a single download: background updates also keep the mode going.
+- If the combination is already taken by another program, the hotkey switch says so and stays off.
+- The global hotkey accepts letters, digits, F1–F24, arrows, Home/End, PgUp/PgDn, Ins/Del, Space and Pause together with Ctrl, Alt or Win.
+- The files are not signed: auto-update verifies the size and SHA-256 from GitHub, but not a signature.
 
-## Лицензия
+## License
 
 [MIT](LICENSE)

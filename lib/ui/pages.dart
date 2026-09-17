@@ -9,11 +9,24 @@ import '../probes.dart';
 import '../schedule.dart';
 import '../strings.dart';
 import '../theme.dart';
+import '../updater.dart';
+import 'hold_button.dart';
+import 'hotkey_field.dart';
 import 'pressable.dart';
 import 'segmented.dart';
 import 'toggle.dart';
 
-enum SettingsPage { mode, schedule, general, picker }
+enum SettingsPage {
+  mode,
+  schedule,
+  general,
+  system,
+  picker,
+  adapter;
+
+  /// Вложенная страница раздела «Режим».
+  bool get isSub => this == picker || this == adapter;
+}
 
 /// Содержимое панели настроек: переключатель разделов + текущий раздел.
 /// Раздел сменяется кроссфейдом со сдвигом, высота панели меняется плавно.
@@ -27,12 +40,18 @@ class SettingsPages extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = S.current;
-    final tab = page == SettingsPage.picker ? SettingsPage.mode : page;
+    final tab = page.isSub ? SettingsPage.mode : page;
     final body = switch (page) {
-      SettingsPage.mode => _ModePage(c: c, onPick: () => onPage(SettingsPage.picker)),
+      SettingsPage.mode => _ModePage(
+        c: c,
+        onPick: () => onPage(SettingsPage.picker),
+        onAdapter: () => onPage(SettingsPage.adapter),
+      ),
       SettingsPage.schedule => _SchedulePage(c: c),
       SettingsPage.general => _GeneralPage(c: c),
+      SettingsPage.system => _SystemPage(c: c),
       SettingsPage.picker => _ProcessPicker(c: c, onDone: () => onPage(SettingsPage.mode)),
+      SettingsPage.adapter => _AdapterPicker(c: c, onDone: () => onPage(SettingsPage.mode)),
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -43,9 +62,11 @@ class SettingsPages extends StatelessWidget {
             (SettingsPage.mode, s.pageMode),
             (SettingsPage.schedule, s.pageSchedule),
             (SettingsPage.general, s.pageGeneral),
+            (SettingsPage.system, s.pageSystem),
           ],
           value: tab,
           onChanged: onPage,
+          focusTag: 'page',
         ),
         const SizedBox(height: 12),
         AnimatedSize(
@@ -103,9 +124,9 @@ class SectionLabel extends StatelessWidget {
 // ---------------- Режим ----------------
 
 class _ModePage extends StatelessWidget {
-  const _ModePage({required this.c, required this.onPick});
+  const _ModePage({required this.c, required this.onPick, required this.onAdapter});
   final VigilController c;
-  final VoidCallback onPick;
+  final VoidCallback onPick, onAdapter;
 
   @override
   Widget build(BuildContext context) {
@@ -127,23 +148,44 @@ class _ModePage extends StatelessWidget {
         padding: const EdgeInsets.only(top: 8),
         child: _RowButton(
           icon: Icons.apps_rounded,
-          label: c.processName ?? s.chooseProcess,
-          highlight: c.processName == null,
+          label: c.processes.isEmpty ? s.chooseProcess : processesLabel(c.processes),
+          highlight: c.processes.isEmpty,
           trailing: Icons.chevron_right_rounded,
           onTap: onPick,
         ),
       ),
       Until.download => Padding(
         key: const ValueKey('download'),
-        padding: const EdgeInsets.fromLTRB(4, 10, 4, 2),
-        child: Row(
+        padding: const EdgeInsets.only(top: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(Icons.download_rounded, size: 14, color: C.accent),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                s.downloadHint,
-                style: mono(10, weight: FontWeight.w500, color: C.subtext0),
+            Segmented<int>(
+              label: s.threshold,
+              items: [for (final k in downloadPresets) (k, kbpsLabel(k, s))],
+              value: c.downloadKbps,
+              onChanged: c.setDownloadKbps,
+            ),
+            const SizedBox(height: 8),
+            _RowButton(
+              icon: Icons.lan_rounded,
+              label: s.adapterLabel(c.adapter == null ? s.allAdapters : c.adapterName ?? ''),
+              trailing: Icons.chevron_right_rounded,
+              onTap: onAdapter,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+              child: Row(
+                children: [
+                  Icon(Icons.download_rounded, size: 14, color: C.accent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      s.downloadHint(kbpsLabel(c.downloadKbps, s)),
+                      style: mono(10, weight: FontWeight.w500, color: C.subtext0),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -182,6 +224,8 @@ class _ModePage extends StatelessWidget {
     );
   }
 }
+
+String kbpsLabel(int k, S s) => k < 1000 ? '$k ${s.kbs}' : '${k ~/ 1000} ${s.mbs}';
 
 String presetLabel(int m, S s) => m < 60 ? '$m${s.minutes}' : '${m ~/ 60}${s.hours}';
 
@@ -260,14 +304,16 @@ class _ProcessPicker extends StatefulWidget {
 class _ProcessPickerState extends State<_ProcessPicker> {
   final _query = TextEditingController();
   final _focus = FocusNode();
-  late List<String> _all = _load();
+  late List<WatchedProcess> _all = _load();
 
-  List<String> _load() {
+  List<WatchedProcess> _load() {
     final list = pickableProcesses();
-    final chosen = widget.c.processName;
-    // выбранный ранее процесс мог уже завершиться — всё равно показываем его
-    if (chosen != null && !list.contains(chosen)) list.insert(0, chosen);
-    return list;
+    // выбранные ранее программы могли уже завершиться — всё равно показываем их первыми
+    return [
+      for (final p in widget.c.processes)
+        if (!list.contains(p)) p,
+      ...list,
+    ];
   }
 
   @override
@@ -283,16 +329,17 @@ class _ProcessPickerState extends State<_ProcessPicker> {
     super.dispose();
   }
 
-  void _pick(String name) {
-    widget.c.setProcess(name);
-    widget.onDone();
-  }
-
   @override
   Widget build(BuildContext context) {
     final s = S.current;
     final q = _query.text.trim().toLowerCase();
-    final items = q.isEmpty ? _all : _all.where((n) => n.contains(q)).toList();
+    final items = q.isEmpty ? _all : _all.where((p) => p.name.contains(q) || (p.path?.contains(q) ?? false)).toList();
+    final chosen = widget.c.processes;
+    // одинаковые имена из разных папок подписываем папкой
+    final names = <String, int>{};
+    for (final p in _all) {
+      names[p.name] = (names[p.name] ?? 0) + 1;
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -320,7 +367,7 @@ class _ProcessPickerState extends State<_ProcessPicker> {
         ),
         const SizedBox(height: 8),
         SizedBox(
-          height: 176,
+          height: 160,
           child: items.isEmpty
               ? Center(
                   child: Text(
@@ -332,14 +379,27 @@ class _ProcessPickerState extends State<_ProcessPicker> {
                   padding: EdgeInsets.zero,
                   itemCount: items.length,
                   itemExtent: 30,
-                  itemBuilder: (context, i) => _ProcessRow(
-                    name: items[i],
-                    selected: items[i] == widget.c.processName,
+                  itemBuilder: (context, i) => _PickRow(
+                    name: items[i].name,
+                    hint: names[items[i].name]! > 1 && items[i].folder != null ? '${items[i].folder}\\' : null,
+                    selected: chosen.contains(items[i]),
                     // каскад только для первых строк, как у списков в остальном UI
                     index: math.min(i, 8),
-                    onTap: () => _pick(items[i]),
+                    onTap: () => widget.c.toggleProcess(items[i]),
                   ),
                 ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 14,
+          child: AnimatedSwitcher(
+            duration: D.color,
+            child: Text(
+              chosen.isEmpty ? s.pickHint : s.picked(chosen.length, maxWatched),
+              key: ValueKey(chosen.length),
+              style: mono(10, weight: FontWeight.w500, color: chosen.isEmpty ? C.overlay0 : C.subtext0),
+            ),
+          ),
         ),
       ],
     );
@@ -398,18 +458,27 @@ class _SearchField extends StatelessWidget {
   );
 }
 
-class _ProcessRow extends StatefulWidget {
-  const _ProcessRow({required this.name, required this.selected, required this.index, required this.onTap});
+class _PickRow extends StatefulWidget {
+  const _PickRow({
+    required this.name,
+    required this.selected,
+    required this.index,
+    required this.onTap,
+    this.hint,
+    this.icon,
+  });
   final String name;
+  final String? hint; // приглушённая подпись после имени
+  final IconData? icon;
   final bool selected;
   final int index;
   final VoidCallback onTap;
 
   @override
-  State<_ProcessRow> createState() => _ProcessRowState();
+  State<_PickRow> createState() => _PickRowState();
 }
 
-class _ProcessRowState extends State<_ProcessRow> with SingleTickerProviderStateMixin {
+class _PickRowState extends State<_PickRow> with SingleTickerProviderStateMixin {
   // строка въезжает слева: задержка index·40ms, 300ms OutBack(0.85)
   late final AnimationController _in;
 
@@ -436,7 +505,7 @@ class _ProcessRowState extends State<_ProcessRow> with SingleTickerProviderState
       pop: 1.01,
       flash: 0.1,
       semanticLabel: widget.name,
-      selected: widget.selected,
+      toggled: widget.selected,
       onTap: widget.onTap,
       builder: (context, hovered, _) => AnimatedContainer(
         duration: D.color,
@@ -447,15 +516,54 @@ class _ProcessRowState extends State<_ProcessRow> with SingleTickerProviderState
           borderRadius: BorderRadius.circular(6),
         ),
         alignment: Alignment.centerLeft,
-        child: Text(
-          widget.name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: mono(
-            11.5,
-            weight: widget.selected ? FontWeight.w700 : FontWeight.w500,
-            color: widget.selected ? C.onAccent : (hovered ? C.text : C.subtext0),
-          ),
+        child: Row(
+          children: [
+            if (widget.icon != null) ...[
+              Icon(widget.icon, size: 14, color: widget.selected ? C.onAccent : (hovered ? C.accent : C.overlay0)),
+              const SizedBox(width: 8),
+            ],
+            // имя и подпись занимают всё место до галочки — галочка всегда у правого края
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      widget.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: mono(
+                        11.5,
+                        weight: widget.selected ? FontWeight.w700 : FontWeight.w500,
+                        color: widget.selected ? C.onAccent : (hovered ? C.text : C.subtext0),
+                      ),
+                    ),
+                  ),
+                  if (widget.hint != null) ...[
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        widget.hint!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: mono(
+                          10,
+                          weight: FontWeight.w500,
+                          color: widget.selected ? C.onAccent.withValues(alpha: 0.6) : C.overlay0,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            // галочка «выскакивает» с пружинкой
+            AnimatedScale(
+              scale: widget.selected ? 1 : 0,
+              duration: still ? Duration.zero : const Duration(milliseconds: 320),
+              curve: widget.selected ? const OutBack(1.8) : Curves.easeInCubic,
+              child: Icon(Icons.check_rounded, size: 15, color: C.onAccent),
+            ),
+          ],
         ),
       ),
     );
@@ -475,6 +583,96 @@ class _ProcessRowState extends State<_ProcessRow> with SingleTickerProviderState
   }
 }
 
+// ---------------- Выбор адаптера ----------------
+
+class _AdapterPicker extends StatefulWidget {
+  const _AdapterPicker({required this.c, required this.onDone});
+  final VigilController c;
+  final VoidCallback onDone;
+
+  @override
+  State<_AdapterPicker> createState() => _AdapterPickerState();
+}
+
+class _AdapterPickerState extends State<_AdapterPicker> {
+  late List<NetAdapter> _all = pickableAdapters();
+
+  void _pick(String? guid, String? name) {
+    widget.c.setAdapter(guid, name);
+    widget.onDone();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.current, c = widget.c;
+    // выбранный адаптер сейчас может быть отключён — всё равно показываем его
+    final missing = c.adapter != null && !_all.any((a) => a.guid == c.adapter);
+    final rows = <Widget>[
+      _PickRow(
+        name: s.allAdapters,
+        hint: s.allAdaptersHint,
+        icon: Icons.hub_rounded,
+        selected: c.adapter == null,
+        index: 0,
+        onTap: () => _pick(null, null),
+      ),
+      if (missing)
+        _PickRow(
+          name: c.adapterName ?? '',
+          hint: s.disconnected,
+          icon: Icons.link_off_rounded,
+          selected: true,
+          index: 1,
+          onTap: widget.onDone,
+        ),
+      for (final (i, a) in _all.indexed)
+        _PickRow(
+          name: a.name,
+          hint: a.vpn ? 'VPN' : null,
+          icon: a.vpn
+              ? Icons.vpn_lock_rounded
+              : a.wireless
+              ? Icons.wifi_rounded
+              : Icons.settings_ethernet_rounded,
+          selected: a.guid == c.adapter,
+          index: math.min(i + (missing ? 2 : 1), 8),
+          onTap: () => _pick(a.guid, a.name),
+        ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            SizedBox(
+              width: 34,
+              child: _RowButton(icon: Icons.arrow_back_rounded, label: s.back, iconOnly: true, onTap: widget.onDone),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(s.adapterTitle, style: mono(12, color: C.text)),
+            ),
+            SizedBox(
+              width: 34,
+              child: _RowButton(
+                icon: Icons.refresh_rounded,
+                label: s.refresh,
+                iconOnly: true,
+                onTap: () => setState(() => _all = pickableAdapters()),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 180),
+          child: ListView(padding: EdgeInsets.zero, shrinkWrap: true, itemExtent: 30, children: rows),
+        ),
+      ],
+    );
+  }
+}
+
 // ---------------- Расписание ----------------
 
 class _SchedulePage extends StatelessWidget {
@@ -490,7 +688,11 @@ class _SchedulePage extends StatelessWidget {
         Toggle(
           icon: Icons.event_rounded,
           label: s.scheduleToggle,
-          hint: sch.enabled && c.scheduled && c.windowEnd != null ? s.onSchedule(hhmm(c.windowEnd!)) : null,
+          hint: switch ((c.windowEnd, c.nextWindow)) {
+            (final end?, _) when c.scheduled => s.onSchedule(hhmm(end)),
+            (_, final next?) => s.nextWindow(whenText(next, c.now, s)),
+            _ => null,
+          },
           value: sch.enabled,
           onChanged: (v) => c.setSchedule(sch.copyWith(enabled: v)),
         ),
@@ -713,6 +915,7 @@ class _GeneralPage extends StatelessWidget {
               _Swatch(
                 color: accentPresets[i],
                 label: s.accentNames[i],
+                tag: 'accent$i',
                 selected: c.accent == i,
                 onTap: () => c.setAccent(i),
               ),
@@ -725,17 +928,9 @@ class _GeneralPage extends StatelessWidget {
           items: const [('ru', 'Русский'), ('en', 'English')],
           value: s.code,
           onChanged: c.setLanguage,
+          focusTag: 'lang',
         ),
         Container(height: 1, margin: const EdgeInsets.fromLTRB(2, 12, 2, 4), color: C.hairline),
-        Toggle(
-          icon: Icons.keyboard_rounded,
-          label: s.hotkey,
-          hint: c.hotkeyBusy ? 'Ctrl+Alt+V — ${s.hotkeyBusy}' : 'Ctrl+Alt+V',
-          warn: c.hotkeyBusy,
-          value: c.hotkey && !c.hotkeyBusy,
-          onChanged: c.setHotkey,
-        ),
-        Toggle(icon: Icons.rocket_launch_rounded, label: s.autostart, value: c.autostart, onChanged: c.setAutostart),
         Toggle(
           icon: c.soundsOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
           label: s.sounds,
@@ -747,11 +942,194 @@ class _GeneralPage extends StatelessWidget {
   }
 }
 
+// ---------------- Система ----------------
+
+class _SystemPage extends StatelessWidget {
+  const _SystemPage({required this.c});
+  final VigilController c;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.current;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Toggle(
+          icon: Icons.keyboard_rounded,
+          label: s.hotkey,
+          hintWidget: Row(
+            children: [
+              Flexible(
+                child: HotkeyField(
+                  value: c.hotkeyKey,
+                  busy: c.hotkeyBusy,
+                  busyText: s.hotkeyBusy,
+                  onChanged: c.setHotkeyKey,
+                  onRecording: c.recordHotkey,
+                ),
+              ),
+            ],
+          ),
+          value: c.hotkey && c.hotkeyActive,
+          onChanged: c.setHotkey,
+        ),
+        Toggle(icon: Icons.rocket_launch_rounded, label: s.autostart, value: c.autostart, onChanged: c.setAutostart),
+        Container(height: 1, margin: const EdgeInsets.fromLTRB(2, 4, 2, 10), color: C.hairline),
+        _UpdatesSection(c: c),
+      ],
+    );
+  }
+}
+
+/// Обновления: автопроверка, статус и кнопка «удерживайте, чтобы обновить».
+class _UpdatesSection extends StatefulWidget {
+  const _UpdatesSection({required this.c});
+  final VigilController c;
+
+  @override
+  State<_UpdatesSection> createState() => _UpdatesSectionState();
+}
+
+class _UpdatesSectionState extends State<_UpdatesSection> {
+  @override
+  void initState() {
+    super.initState();
+    // не во время построения: проверка сразу меняет статус
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.c.checkUpdatesSoon();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.current, c = widget.c, u = c.updater;
+    return ListenableBuilder(
+      listenable: u,
+      builder: (context, _) {
+        final latest = u.latest?.version ?? '';
+        final percent = (u.progress * 100).round();
+        final status = switch (u.status) {
+          UpdateStatus.idle => s.updCurrent(appVersion),
+          UpdateStatus.checking => s.updChecking,
+          UpdateStatus.upToDate => s.updLatest(appVersion),
+          UpdateStatus.available => s.updAvailable(latest),
+          UpdateStatus.downloading => s.updDownloading(percent).toLowerCase(),
+          UpdateStatus.installing => s.updInstalling.toLowerCase(),
+          UpdateStatus.failed => s.updFailed,
+        };
+        final (label, progress) = switch (u.status) {
+          UpdateStatus.downloading => (s.updDownloading(percent), u.progress),
+          UpdateStatus.installing => (s.updInstalling, 1.0),
+          _ => (u.installed ? s.holdToUpdate(latest) : s.holdToDownload(latest), null),
+        };
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionLabel(
+              Icons.system_update_alt_rounded,
+              s.updates,
+              trailing: _SpinButton(
+                label: s.checkNow,
+                spinning: u.status == UpdateStatus.checking,
+                onTap: u.busy ? null : () => u.check(),
+              ),
+            ),
+            Toggle(
+              icon: Icons.autorenew_rounded,
+              label: s.checkUpdates,
+              hint: status,
+              warn: u.status == UpdateStatus.failed,
+              value: c.checkUpdates,
+              onChanged: c.setCheckUpdates,
+            ),
+            AnimatedSize(
+              duration: D.panel,
+              curve: Curves.easeOutCubic,
+              child: u.hasUpdate
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: HoldButton(
+                        label: label,
+                        icon: Icons.download_rounded,
+                        progress: progress,
+                        sounds: c.sounds,
+                        onConfirmed: u.update,
+                      ),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Маленькая круглая кнопка с иконкой обновления; крутится, пока идёт проверка.
+class _SpinButton extends StatefulWidget {
+  const _SpinButton({required this.label, required this.spinning, required this.onTap});
+  final String label;
+  final bool spinning;
+  final VoidCallback? onTap;
+
+  @override
+  State<_SpinButton> createState() => _SpinButtonState();
+}
+
+class _SpinButtonState extends State<_SpinButton> with SingleTickerProviderStateMixin {
+  late final _spin = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+
+  @override
+  void didUpdateWidget(_SpinButton old) {
+    super.didUpdateWidget(old);
+    if (widget.spinning && !reduceMotion(context)) {
+      if (!_spin.isAnimating) _spin.repeat();
+    } else if (_spin.isAnimating) {
+      // докручиваем до целого оборота, чтобы иконка не замирала боком
+      _spin.animateTo(1, duration: Duration(milliseconds: ((1 - _spin.value) * 900).round() + 1)).then((_) {
+        if (mounted) _spin.value = 0;
+      }, onError: (_) {});
+    }
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Pressable(
+    radius: BorderRadius.circular(11),
+    pop: 1.12,
+    popUp: 110,
+    popDown: 420,
+    flash: 0.3,
+    hoverScale: 1.08,
+    pressScale: 0.92,
+    semanticLabel: widget.label,
+    onTap: widget.onTap ?? () {},
+    builder: (context, hovered, _) => SizedBox.square(
+      dimension: 22,
+      child: RotationTransition(
+        turns: _spin,
+        child: Icon(Icons.refresh_rounded, size: 15, color: widget.spinning || hovered ? C.accent : C.overlay0),
+      ),
+    ),
+  );
+}
+
 /// Цветной кружок акцента: выбранный обведён кольцом, которое «пружинит» при выборе.
 class _Swatch extends StatelessWidget {
-  const _Swatch({required this.color, required this.label, required this.selected, required this.onTap});
+  const _Swatch({
+    required this.color,
+    required this.label,
+    required this.tag,
+    required this.selected,
+    required this.onTap,
+  });
   final Color color;
-  final String label;
+  final String label, tag;
   final bool selected;
   final VoidCallback onTap;
 
@@ -767,6 +1145,7 @@ class _Swatch extends StatelessWidget {
     pressScale: 0.92,
     selected: selected,
     semanticLabel: label,
+    focusTag: tag,
     onTap: onTap,
     builder: (context, hovered, _) => SizedBox.square(
       dimension: 34,

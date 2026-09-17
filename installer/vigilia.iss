@@ -3,7 +3,7 @@
 ;   iscc installer\vigilia.iss
 ; Результат: build\installer\Vigilia-<версия>-setup.exe
 
-#define AppVersion "1.1.0"
+#define AppVersion "1.2.0"
 
 [Setup]
 AppId={{9A4C1BF9-3C8C-4535-90F3-05499110A5FD}
@@ -48,6 +48,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; от версии 1.1 остались иконки трея в старом месте
+[InstallDelete]
+Type: files; Name: "{app}\data\flutter_assets\assets\tray_*.ico"
+
 [Icons]
 ; AppUserModelID нужен, чтобы уведомления Windows подписывались как «Vigilia»
 Name: "{autoprograms}\Vigilia"; Filename: "{app}\vigilia.exe"; AppUserModelID: "alexskvo10.Vigilia"
@@ -60,3 +64,33 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\vigilia.exe"; Description: "{cm:LaunchProgram,Vigilia}"; Flags: nowait postinstall skipifsilent
+; автообновление из приложения ставит тихо (/SILENT /UPDATE) и после установки запускает Vigilia снова
+Filename: "{app}\vigilia.exe"; Flags: nowait; Check: IsUpdate
+
+[Code]
+function IsUpdate: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/UPDATE') = 0 then
+      Result := True;
+end;
+
+// InitializeSetup вызывается до проверки AppMutex: при обновлении из приложения
+// ждём, пока Vigilia закроется сама, вместо сообщения «приложение запущено».
+function InitializeSetup: Boolean;
+var
+  Waited: Integer;
+begin
+  Result := True;
+  if not IsUpdate then
+    Exit;
+  Waited := 0;
+  while CheckForMutexes('Vigilia.SingleInstance') and (Waited < 20000) do
+  begin
+    Sleep(250);
+    Waited := Waited + 250;
+  end;
+end;

@@ -138,6 +138,7 @@ class _SettingsDrawerState extends State<SettingsDrawer> with SingleTickerProvid
       height: _tabH,
       child: Pressable(
         focusNode: _tabFocus,
+        focusTag: 'settings',
         radius: BorderRadius.circular(_tabH / 2),
         // форму кнопки рисует панель и она не масштабируется, поэтому содержимое
         // не должно выходить наружу: без увеличения на hover, клик — сжатие внутрь

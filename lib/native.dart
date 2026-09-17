@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'hotkey.dart';
+
 /// Dart-сторона канала `vigilia/native` (windows/runner/native_shell.cpp).
 class Native {
   static const _channel = MethodChannel('vigilia/native');
@@ -25,19 +27,22 @@ class Native {
 
   static Future<void> setTray({
     required bool on,
+    required int accent,
     required String tooltip,
     required String toggle,
     required String show,
     required String quit,
-  }) => _call('setTray', {'on': on, 'tooltip': tooltip, 'toggle': toggle, 'show': show, 'quit': quit});
+  }) =>
+      _call('setTray', {'on': on, 'accent': accent, 'tooltip': tooltip, 'toggle': toggle, 'show': show, 'quit': quit});
 
   static Future<void> notify(String title, String body) => _call('notify', {'title': title, 'body': body});
 
   static Future<void> removeTray() => _call('removeTray');
 
-  static Future<bool> setHotkey(bool on) async {
+  /// Регистрирует (или снимает) глобальное сочетание; false — занято другой программой.
+  static Future<bool> setHotkey(bool on, Hotkey key) async {
     try {
-      return await _channel.invokeMethod<bool>('setHotkey', on) ?? false;
+      return await _channel.invokeMethod<bool>('setHotkey', {'on': on, 'mods': key.mods, 'vk': key.vk}) ?? false;
     } on PlatformException {
       return false;
     }

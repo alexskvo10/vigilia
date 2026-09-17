@@ -1,7 +1,10 @@
-"""Генерирует иконки Vigilia (глаз в круге) — трей вкл/выкл и иконку приложения.
+"""Генерирует иконки Vigilia (глаз в круге): трей вкл/выкл для каждого цвета акцента
+и (с флагом --app) иконку приложения.
 
-    python tool/make_icons.py
+    python tool/make_icons.py [--app]
 """
+import colorsys
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -9,10 +12,47 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parent.parent
 S = 1024  # рисуем крупно, потом уменьшаем — получаем сглаживание
 
+# цвета для лилового акцента; для остальных пересчитываются из акцента (как Palette в lib/theme.dart)
 ACCENT, ACCENT_DARK = (0xCB, 0xA6, 0xF7), (0xA7, 0x7F, 0xD8)
 SURF_HI, SURF_LO = (0x55, 0x4A, 0x6B), (0x2B, 0x24, 0x38)
 INK_ON, INK_OFF = (0x10, 0x0D, 0x16), (0xD2, 0xC8, 0xE6)
 SCLERA = (0xFB, 0xF6, 0xFF)
+
+# те же цвета, что accentPresets в lib/theme.dart
+ACCENTS = [0xCBA6F7, 0x89B4FA, 0x94E2D5, 0xA6E3A1, 0xFAB387, 0xF5C2E7]
+
+
+def rgb(v):
+    return (v >> 16 & 255, v >> 8 & 255, v & 255)
+
+
+def hls(c):
+    return colorsys.rgb_to_hls(*(x / 255 for x in c))
+
+
+def from_hls(h, l, s):
+    return tuple(round(x * 255) for x in colorsys.hls_to_rgb(h % 1, min(l, 1), min(s, 1)))
+
+
+def colors(accent):
+    """Цвета иконки для акцента: тёмные слои получают тон акцента −7°, светлота и насыщенность — исходные."""
+    ah, al, as_ = hls(accent)
+    tone = ah - 7 / 360
+    _, dl, ds = hls(ACCENT_DARK)
+    _, l0, s0 = hls(ACCENT)
+
+    def toned(c):
+        _, l, s = hls(c)
+        return from_hls(tone, l, s)
+
+    return {
+        "accent": accent,
+        "dark": from_hls(ah, al * dl / l0, as_ * ds / s0),
+        "hi": toned(SURF_HI),
+        "lo": toned(SURF_LO),
+        "ink_on": toned(INK_ON),
+        "ink_off": toned(INK_OFF),
+    }
 
 
 def lerp(a, b, t):
@@ -29,10 +69,10 @@ def quad(p0, p1, p2, n=64):
     ]
 
 
-def render(on: bool) -> Image.Image:
+def render(on: bool, pal: dict) -> Image.Image:
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     # диагональный градиент диска
-    hi, lo = (ACCENT, ACCENT_DARK) if on else (SURF_HI, SURF_LO)
+    hi, lo = (pal["accent"], pal["dark"]) if on else (pal["hi"], pal["lo"])
     grad = Image.new("RGBA", (S, S))
     gp = grad.load()
     for y in range(S):
@@ -47,7 +87,7 @@ def render(on: bool) -> Image.Image:
     d = ImageDraw.Draw(img)
     cx, cy = S / 2, S / 2 + 20
     w, h = S * 0.62, S * 0.21
-    ink = INK_ON if on else INK_OFF
+    ink = pal["ink_on"] if on else pal["ink_off"]
     stroke = round(S * 0.055)
     left, right = (cx - w / 2, cy), (cx + w / 2, cy)
     if on:
@@ -55,7 +95,7 @@ def render(on: bool) -> Image.Image:
         lower = quad(right, (cx, cy + 1.7 * h), left)
         d.polygon(upper + lower, fill=SCLERA)
         ir = h * 0.95
-        d.ellipse((cx - ir, cy - ir + h * 0.05, cx + ir, cy + ir + h * 0.05), fill=INK_ON)
+        d.ellipse((cx - ir, cy - ir + h * 0.05, cx + ir, cy + ir + h * 0.05), fill=ink)
         hr = ir * 0.28
         hx, hy = cx - ir * 0.32, cy - ir * 0.3
         d.ellipse((hx - hr, hy - hr, hx + hr, hy + hr), fill=SCLERA)
@@ -89,11 +129,17 @@ def save_ico(img: Image.Image, path: Path, sizes):
 
 
 if __name__ == "__main__":
-    on, off = render(True), render(False)
     tray = [16, 20, 24, 32, 40, 48]
-    save_ico(on.resize((256, 256), Image.LANCZOS), ROOT / "assets/tray_on.ico", tray)
-    save_ico(off.resize((256, 256), Image.LANCZOS), ROOT / "assets/tray_off.ico", tray)
-    save_ico(on.resize((256, 256), Image.LANCZOS), ROOT / "windows/runner/resources/app_icon.ico",
-             [16, 24, 32, 48, 64, 128, 256])
-    on.resize((512, 512), Image.LANCZOS).save(ROOT / "assets/icon.png")
-    print("wrote assets/icon.png")
+    for i, value in enumerate(ACCENTS):
+        pal = colors(rgb(value))
+        for on in (True, False):
+            img = render(on, pal).resize((256, 256), Image.LANCZOS)
+            save_ico(img, ROOT / f"assets/tray/{'on' if on else 'off'}_{i}.ico", tray)
+    if "--app" in sys.argv:
+        # иконка приложения — в исходных лиловых цветах
+        base = {"accent": ACCENT, "dark": ACCENT_DARK, "hi": SURF_HI, "lo": SURF_LO, "ink_on": INK_ON, "ink_off": INK_OFF}
+        on = render(True, base)
+        save_ico(on.resize((256, 256), Image.LANCZOS), ROOT / "windows/runner/resources/app_icon.ico",
+                 [16, 24, 32, 48, 64, 128, 256])
+        on.resize((512, 512), Image.LANCZOS).save(ROOT / "assets/icon.png")
+        print("wrote assets/icon.png")

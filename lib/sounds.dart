@@ -31,6 +31,21 @@ Float64List synth(List<Note> notes, {double gain = 0.22}) {
   return out;
 }
 
+/// «Зарядка» для кнопки удержания: гул с пульсацией, 0.8 с, зацикливается без щелчка
+/// (огибающая sin² начинается и кончается нулём). Громкость 0.6 от обычной.
+Float64List hum() {
+  const len = 0.8;
+  final n = (len * sampleRate).round();
+  final out = Float64List(n);
+  for (var i = 0; i < n; i++) {
+    final t = i / sampleRate;
+    final env = math.pow(math.sin(math.pi * t / len), 2).toDouble();
+    // частоты кратны 1/len — фаза в конце цикла совпадает с началом
+    out[i] = 0.6 * 0.2 * env * (math.sin(2 * math.pi * 275 * t) + 0.5 * math.sin(2 * math.pi * 550 * t));
+  }
+  return out;
+}
+
 /// PCM 16 бит, моно, 44.1 кГц в контейнере RIFF/WAVE.
 Uint8List wav(Float64List samples) {
   final data = samples.length * 2;
@@ -60,7 +75,7 @@ Uint8List wav(Float64List samples) {
   return b.buffer.asUint8List();
 }
 
-enum Sfx { on, off, tick, done }
+enum Sfx { on, off, tick, done, charge, impact }
 
 Float64List sfxSamples(Sfx s) => switch (s) {
   Sfx.on => synth([(hz: 659.3, at: 0, len: 0.22), (hz: 987.8, at: 0.09, len: 0.34)]),
@@ -71,6 +86,12 @@ Float64List sfxSamples(Sfx s) => switch (s) {
     (hz: 987.8, at: 0.12, len: 0.25),
     (hz: 659.3, at: 0.24, len: 0.5),
   ]),
+  Sfx.charge => hum(),
+  Sfx.impact => synth([
+    (hz: 98, at: 0, len: 0.4),
+    (hz: 147, at: 0, len: 0.3),
+    (hz: 1318.5, at: 0, len: 0.06),
+  ], gain: 0.24),
 };
 
 /// Буферы выделяются один раз и живут до конца процесса: PlaySound(SND_ASYNC)
@@ -79,7 +100,8 @@ class Sounds {
   bool enabled = true;
   final Map<Sfx, Pointer<Uint8>> _cache = {};
 
-  void play(Sfx s) {
+  /// [loop] — повторять, пока не прозвучит другой звук или [stop].
+  void play(Sfx s, {bool loop = false}) {
     if (!enabled) return;
     final p = _cache.putIfAbsent(s, () {
       final bytes = wav(sfxSamples(s));
@@ -87,6 +109,8 @@ class Sounds {
       mem.asTypedList(bytes.length).setAll(0, bytes);
       return mem;
     });
-    playWav(p);
+    playWav(p, loop: loop);
   }
+
+  void stop() => stopWav();
 }

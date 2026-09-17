@@ -29,6 +29,13 @@ jobs:
       - run: flutter test
       - run: flutter build windows --release
 
+      # тесты нативной оболочки; им нужна папка windows/flutter/ephemeral из сборки выше
+      - name: Native tests
+        run: |
+          cmake -S windows/runner/test -B build/native_test
+          cmake --build build/native_test --config Release
+          ctest --test-dir build/native_test -C Release --output-on-failure
+
       - name: Installer
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         shell: pwsh

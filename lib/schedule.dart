@@ -1,3 +1,5 @@
+import 'strings.dart';
+
 /// Расписание: дни недели (бит 0 = понедельник) и окно «с — до» в минутах от полуночи.
 /// Если «до» не позже «с», окно идёт через полночь и принадлежит дню начала.
 class Schedule {
@@ -31,6 +33,19 @@ class Schedule {
     return null;
   }
 
+  /// Начало ближайшего окна после [now]; null — расписание выключено или без дней.
+  DateTime? nextStart(DateTime now) {
+    if (!enabled || days == 0) return null;
+    final today = DateTime(now.year, now.month, now.day);
+    for (var i = 0; i <= 7; i++) {
+      final day = DateTime(today.year, today.month, today.day + i);
+      if (!hasDay(day.weekday)) continue;
+      final from = _at(day, start);
+      if (from.isAfter(now)) return from;
+    }
+    return null;
+  }
+
   // Через DateTime(y, m, d, h, m), а не add(minutes): переход на летнее время не сдвигает окно.
   static DateTime _at(DateTime day, int minutes) => DateTime(day.year, day.month, day.day, minutes ~/ 60, minutes % 60);
 
@@ -46,6 +61,17 @@ class Schedule {
       end: minutes(j['end'], 18 * 60),
     );
   }
+}
+
+/// «сегодня в 09:00», «завтра в 09:00», «в понедельник в 09:00».
+String whenText(DateTime t, DateTime now, S s) {
+  // календарные дни в UTC: переход на летнее время не превращает сутки в 23 часа
+  final days = DateTime.utc(t.year, t.month, t.day).difference(DateTime.utc(now.year, now.month, now.day)).inDays;
+  return switch (days) {
+    0 => s.todayAt(hhmm(t)),
+    1 => s.tomorrowAt(hhmm(t)),
+    _ => s.weekdayAt(t.weekday, hhmm(t)),
+  };
 }
 
 String hhmm(DateTime t) => '${two(t.hour)}:${two(t.minute)}';

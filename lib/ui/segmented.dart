@@ -8,12 +8,22 @@ import 'pressable.dart';
 /// задний 350ms (OutExpo), поэтому плашка сначала тянется, потом подтягивает хвост.
 /// В обход Tab попадает только выбранный сегмент; ←/→, Home/End двигают выбор.
 class Segmented<T> extends StatefulWidget {
-  const Segmented({super.key, required this.items, required this.value, required this.onChanged, this.label});
+  const Segmented({
+    super.key,
+    required this.items,
+    required this.value,
+    required this.onChanged,
+    this.label,
+    this.focusTag,
+  });
 
   final List<(T, String)> items;
   final T value;
   final ValueChanged<T> onChanged;
   final String? label;
+
+  /// Префикс тегов фокуса сегментов (см. [Pressable.focusTag]).
+  final String? focusTag;
 
   @override
   State<Segmented<T>> createState() => _SegmentedState<T>();
@@ -144,6 +154,7 @@ class _SegmentedState<T> extends State<Segmented<T>> with TickerProviderStateMix
                             padding: const EdgeInsets.symmetric(vertical: _inset),
                             child: Pressable(
                               focusNode: _nodes[i],
+                              focusTag: widget.focusTag == null ? null : '${widget.focusTag}$i',
                               radius: BorderRadius.circular(_r - _inset),
                               pressScale: 0.96,
                               selected: i == sel,

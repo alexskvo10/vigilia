@@ -40,6 +40,24 @@ void main() {
       expect(day.windowEnd(wed.add(const Duration(hours: 23))), DateTime(2026, 9, 17));
     });
 
+    test('следующее окно и подпись «когда»', () {
+      final fri = DateTime(2026, 9, 18, 10); // пятница, окно уже идёт
+      expect(weekdays.nextStart(fri), DateTime(2026, 9, 21, 9), reason: 'после пятницы — понедельник');
+      expect(weekdays.nextStart(DateTime(2026, 9, 16, 8)), DateTime(2026, 9, 16, 9));
+      expect(weekdays.copyWith(enabled: false).nextStart(fri), isNull);
+      expect(weekdays.copyWith(days: 0).nextStart(fri), isNull);
+      final onlyWed = weekdays.copyWith(days: 1 << 2);
+      expect(onlyWed.nextStart(DateTime(2026, 9, 16, 10)), DateTime(2026, 9, 23, 9), reason: 'через неделю');
+
+      final now = DateTime(2026, 9, 16, 12);
+      expect(whenText(DateTime(2026, 9, 16, 18), now, S.ru), 'сегодня в 18:00');
+      expect(whenText(DateTime(2026, 9, 17, 9), now, S.ru), 'завтра в 09:00');
+      expect(whenText(DateTime(2026, 9, 21, 9), now, S.ru), 'в понедельник в 09:00');
+      expect(whenText(DateTime(2026, 9, 21, 9), now, S.en), 'on Monday at 09:00');
+      // переход на зимнее время (сутки 25 часов) не ломает «завтра»
+      expect(whenText(DateTime(2026, 10, 26, 9), DateTime(2026, 10, 25, 1), S.ru), 'завтра в 09:00');
+    });
+
     test('JSON туда и обратно', () {
       const s = Schedule(enabled: true, days: 0x41, start: 30, end: 1410);
       final back = Schedule.fromJson(s.toJson());
@@ -48,29 +66,55 @@ void main() {
   });
 
   group('датчики', () {
-    test('netstat -e: английский и русский вывод', () {
-      const en =
-          'Interface Statistics\r\n\r\n    Received   Sent\r\n\r\nBytes   2668910177  4225960665\r\n'
-          'Unicast packets   6204921   4196651\r\n';
-      const ru = 'Статистика интерфейса\r\n\r\n   Получено   Отправлено\r\n\r\nБайт   123456   789\r\n';
-      expect(parseNetstatReceived(en), 2668910177);
-      expect(parseNetstatReceived(ru), 123456);
-      expect(parseNetstatReceived('garbage'), isNull);
+    test('скорость: сумма по адаптерам, новый адаптер и сброс счётчика не дают скачков', () {
+      const dt = Duration(seconds: 2);
+      expect(bytesPerSecond({'a': 1000, 'b': 0}, {'a': 3000, 'b': 2000}, dt), 2000);
+      expect(bytesPerSecond({'a': 1000}, {'a': 3000, 'new': 1 << 40}, dt), 1000);
+      expect(bytesPerSecond({'a': 5000}, {'a': 10}, dt), 0);
+      expect(bytesPerSecond({'a': 0}, {'a': 10}, Duration.zero), 0);
     });
 
-    test('скорость: обычная, переполнение 32-битного счётчика, нулевой интервал', () {
-      expect(bytesPerSecond(1000, 4000, const Duration(seconds: 3)), 1000);
-      expect(bytesPerSecond((1 << 32) - 1000, 1000, const Duration(seconds: 2)), 1000);
-      expect(bytesPerSecond(1000, 2000, Duration.zero), 0);
+    test('сетевые адаптеры видны на этой машине', () {
+      final all = networkInterfaces();
+      expect(all, isNotEmpty);
+      expect(all.map((i) => i.guid).toSet(), hasLength(all.length), reason: 'GUID уникальны, фильтры отброшены');
+      final total = receivedCounters(null);
+      expect(total.keys, everyElement(isIn(all.where((i) => i.hardware).map((i) => i.guid))));
+      final one = all.first;
+      expect(receivedCounters(one.guid), {one.guid: isNonNegative});
+      expect(pickableAdapters().every((a) => all.any((i) => i.guid == a.guid && i.up)), true);
     });
 
     test('процессы видны на этой машине', () {
       // на CI может не быть explorer.exe, а сам тестовый процесс есть всегда
       final self = Platform.resolvedExecutable.split(r'\').last.toLowerCase();
+      final path = Platform.resolvedExecutable;
       expect(runningProcessNames(), contains(self));
-      expect(isProcessRunning(self.toUpperCase()), true);
-      expect(isProcessRunning('definitely-not-running-42.exe'), false);
-      expect(pickableProcesses(), isNot(contains('svchost.exe')));
+      expect(processImagePath(pid), path.toLowerCase());
+      final mine = WatchedProcess(self.toUpperCase(), path);
+      final nameOnly = WatchedProcess(self, null);
+      final elsewhere = WatchedProcess(self, r'C:\nowhere\' + self);
+      final missing = WatchedProcess('definitely-not-running-42.exe', null);
+      expect(runningWatched([mine, nameOnly, elsewhere, missing]), [mine, nameOnly]);
+      final pickable = pickableProcesses();
+      expect(pickable, contains(mine));
+      expect(pickable.map((p) => p.name), isNot(contains('svchost.exe')));
+    });
+
+    test('настройки 1.1 (одно имя процесса) переносятся в список', () {
+      final s = Settings.fromJson({'processName': 'Game.exe'});
+      expect(s.processes, [WatchedProcess('game.exe', null)]);
+      final back = Settings.fromJson(s.toJson());
+      expect(back.processes, s.processes);
+      final json = {
+        'processes': [
+          {'name': ''},
+          5,
+          {'name': 'a.exe', 'path': r'C:\A\a.exe'},
+        ],
+      };
+      expect(Settings.fromJson(json).processes, [WatchedProcess('a.exe', r'c:\a\a.exe')]);
+      expect(WatchedProcess('a.exe', r'C:\Tools\a.exe').folder, 'tools');
     });
 
     test('reg query → значение', () {

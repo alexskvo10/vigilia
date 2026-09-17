@@ -26,6 +26,7 @@ class Shell with WindowListener {
     windowManager.addListener(this);
     Native.listen(onTrayClick: _trayClick, onMenu: _menu, onHotkey: _hotkey);
     c.onFinished = _finished;
+    c.updater.onQuit = quit;
     await windowManager.setPreventClose(true);
     c.addListener(_sync);
     _sync();
@@ -50,14 +51,15 @@ class Shell with WindowListener {
   void _sync() {
     final s = S.current;
     final tip = tooltip(c, s);
-    final key = '${c.active}|${s.code}|$tip';
+    final key = '${c.active}|${c.accent}|${s.code}|$tip';
     if (key == _applied) return;
     _applied = key;
-    final on = c.active;
+    final on = c.active, accent = c.accent;
     // последовательно, чтобы быстрые переключения не перемешали вызовы
     _queue = _queue.then(
       (_) => Native.setTray(
         on: on,
+        accent: accent,
         tooltip: tip,
         toggle: on ? s.trayTurnOff : s.trayTurnOn,
         show: s.trayShow,
@@ -66,12 +68,12 @@ class Shell with WindowListener {
     );
   }
 
-  void _finished(Finish reason, String? detail) {
+  void _finished(Finish reason) {
     if (visible.value) return; // окно перед глазами — хватает звука и статуса
     final s = S.current;
     final body = switch (reason) {
       Finish.timer => s.doneTimer,
-      Finish.process => s.doneProcess(detail ?? ''),
+      Finish.process => c.processes.length == 1 ? s.doneProcess(c.processes.first.name) : s.doneProcessMany,
       Finish.download => s.doneDownload,
       Finish.schedule => s.doneSchedule,
     };
@@ -102,7 +104,7 @@ class Shell with WindowListener {
     windowManager.removeListener(this);
     try {
       await Native.removeTray();
-      await Native.setHotkey(false);
+      await Native.setHotkey(false, Hotkey.fallback);
       await windowManager.setPreventClose(false);
       await windowManager.destroy();
     } finally {

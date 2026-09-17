@@ -98,6 +98,10 @@ class _OrbState extends State<Orb> with TickerProviderStateMixin {
       }
       if (!_still) _wave.forward(from: 0);
       _syncLoops();
+      // открывшийся глаз сразу смотрит на курсор, закрывшийся — прямо (после раскладки кадра)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onPointer();
+      });
     }
   }
 
@@ -198,6 +202,7 @@ class _OrbState extends State<Orb> with TickerProviderStateMixin {
             hoverScale: 1.03,
             pressScale: 0.96,
             autofocus: true,
+            focusTag: 'orb',
             toggled: widget.active,
             semanticLabel: widget.active ? S.current.orbOff : S.current.orbOn,
             onTap: widget.onTap,

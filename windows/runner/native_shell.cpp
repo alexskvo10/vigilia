@@ -33,12 +33,20 @@ bool Bool(const flutter::EncodableMap& m, const char* key) {
   return false;
 }
 
-// Иконки трея лежат рядом с exe: data/flutter_assets/assets/*.ico
-HICON LoadTrayIcon(const wchar_t* name) {
+int Int(const flutter::EncodableMap& m, const char* key) {
+  auto it = m.find(flutter::EncodableValue(key));
+  if (it == m.end()) return 0;
+  if (auto* v = std::get_if<int32_t>(&it->second)) return *v;
+  return 0;
+}
+
+// Иконки трея лежат рядом с exe: data/flutter_assets/assets/tray/{on|off}_N.ico
+HICON LoadTrayIcon(bool on, int accent) {
   wchar_t exe[MAX_PATH];
   ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
   std::wstring path(exe);
-  path = path.substr(0, path.find_last_of(L'\\')) + L"\\data\\flutter_assets\\assets\\" + name;
+  path = path.substr(0, path.find_last_of(L'\\')) + L"\\data\\flutter_assets\\assets\\tray\\" +
+         (on ? L"on_" : L"off_") + std::to_wstring(accent) + L".ico";
   return static_cast<HICON>(::LoadImageW(nullptr, path.c_str(), IMAGE_ICON,
                                          ::GetSystemMetrics(SM_CXSMICON),
                                          ::GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
@@ -63,9 +71,10 @@ NativeShell::NativeShell(HWND hwnd, flutter::BinaryMessenger* messenger)
     } else if (name == "notify" && map) {
       Notify(*map);
       result->Success();
-    } else if (name == "setHotkey") {
-      const auto* on = std::get_if<bool>(call.arguments());
-      result->Success(flutter::EncodableValue(SetHotkey(on && *on)));
+    } else if (name == "setHotkey" && map) {
+      bool ok = SetHotkey(Bool(*map, "on"), static_cast<UINT>(Int(*map, "mods")),
+                          static_cast<UINT>(Int(*map, "vk")));
+      result->Success(flutter::EncodableValue(ok));
     } else if (name == "removeTray") {
       RemoveTray();
       result->Success();
@@ -77,17 +86,23 @@ NativeShell::NativeShell(HWND hwnd, flutter::BinaryMessenger* messenger)
 
 NativeShell::~NativeShell() {
   channel_->SetMethodCallHandler(nullptr);
-  SetHotkey(false);
+  SetHotkey(false, 0, 0);
   RemoveTray();
-  if (icon_on_) ::DestroyIcon(icon_on_);
-  if (icon_off_) ::DestroyIcon(icon_off_);
+  for (HICON icon : icons_on_) if (icon) ::DestroyIcon(icon);
+  for (HICON icon : icons_off_) if (icon) ::DestroyIcon(icon);
   if (icon_large_) ::DestroyIcon(icon_large_);
 }
 
+HICON NativeShell::TrayIcon() {
+  auto& icons = on_ ? icons_on_ : icons_off_;
+  if (!icons[accent_]) icons[accent_] = LoadTrayIcon(on_, accent_);
+  return icons[accent_];
+}
+
 void NativeShell::SetTray(const flutter::EncodableMap& args) {
-  if (!icon_on_) icon_on_ = LoadTrayIcon(L"tray_on.ico");
-  if (!icon_off_) icon_off_ = LoadTrayIcon(L"tray_off.ico");
   on_ = Bool(args, "on");
+  accent_ = Int(args, "accent");
+  if (accent_ < 0 || accent_ >= kAccents) accent_ = 0;
   tooltip_ = Wide(Str(args, "tooltip"));
   toggle_ = Wide(Str(args, "toggle"));
   show_ = Wide(Str(args, "show"));
@@ -98,7 +113,7 @@ void NativeShell::SetTray(const flutter::EncodableMap& args) {
   nid.uID = kTrayId;
   nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
   nid.uCallbackMessage = kTrayMessage;
-  nid.hIcon = on_ ? icon_on_ : icon_off_;
+  nid.hIcon = TrayIcon();
   Copy(nid.szTip, ARRAYSIZE(nid.szTip), tooltip_);
   if (added_ && ::Shell_NotifyIconW(NIM_MODIFY, &nid)) return;
   // Если панель задач ещё не готова (автозапуск), иконку добавит TaskbarCreated
@@ -124,12 +139,15 @@ void NativeShell::Notify(const flutter::EncodableMap& args) {
   ::Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
-bool NativeShell::SetHotkey(bool enabled) {
-  if (hotkey_ && !enabled) {
+// Сочетание могло поменяться, поэтому старая регистрация всегда снимается.
+bool NativeShell::SetHotkey(bool enabled, UINT mods, UINT vk) {
+  if (hotkey_) {
     ::UnregisterHotKey(hwnd_, kHotkeyId);
     hotkey_ = false;
-  } else if (!hotkey_ && enabled) {
-    hotkey_ = ::RegisterHotKey(hwnd_, kHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'V') != FALSE;
+  }
+  if (enabled && vk != 0) {
+    UINT flags = (mods & (MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN)) | MOD_NOREPEAT;
+    hotkey_ = ::RegisterHotKey(hwnd_, kHotkeyId, flags, vk) != FALSE;
   }
   return hotkey_;
 }
@@ -190,7 +208,7 @@ std::optional<LRESULT> NativeShell::HandleMessage(UINT message, WPARAM wparam, L
     nid.uID = kTrayId;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = kTrayMessage;
-    nid.hIcon = on_ ? icon_on_ : icon_off_;
+    nid.hIcon = TrayIcon();
     Copy(nid.szTip, ARRAYSIZE(nid.szTip), tooltip_);
     if (nid.hIcon) added_ = ::Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
     return std::nullopt;

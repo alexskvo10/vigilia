@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'hotkey.dart';
 import 'schedule.dart';
 import 'theme.dart';
 
@@ -8,15 +9,61 @@ import 'theme.dart';
 enum Until { always, timer, process, download }
 
 const timerPresets = [30, 60, 120, 240];
+const maxWatched = 10;
+
+/// Пороги скорости режима «загрузка», КБ/с.
+const downloadPresets = [50, 100, 500, 1000];
+
+/// Программа, пока работает которая компьютер не спит.
+/// Имя — для показа и быстрого сравнения, путь — чтобы не спутать разные программы с одинаковым exe.
+/// Путь null, если Windows не дала его прочитать: тогда сравнивается только имя.
+class WatchedProcess {
+  WatchedProcess(String name, String? path) : name = name.toLowerCase(), path = path?.toLowerCase();
+
+  final String name;
+  final String? path;
+
+  String get key => path ?? name;
+
+  /// Папка exe для подсказки, когда одинаковых имён несколько.
+  String? get folder {
+    final p = path;
+    if (p == null) return null;
+    final parts = p.split(r'\');
+    return parts.length < 2 ? null : parts[parts.length - 2];
+  }
+
+  @override
+  bool operator ==(Object other) => other is WatchedProcess && other.key == key && other.name == name;
+
+  @override
+  int get hashCode => Object.hash(name, key);
+
+  Map<String, Object?> toJson() => {'name': name, 'path': path};
+
+  static WatchedProcess? fromJson(Object? j) {
+    if (j is! Map || j['name'] is! String || (j['name'] as String).isEmpty) return null;
+    final path = j['path'];
+    return WatchedProcess(j['name'] as String, path is String && path.isNotEmpty ? path : null);
+  }
+
+  @override
+  String toString() => key;
+}
 
 class Settings {
   bool keepDisplay = false;
   Until until = Until.always;
   int timerMinutes = 60;
-  String? processName;
+  List<WatchedProcess> processes = [];
+  int downloadKbps = 100;
+  String? adapter; // GUID адаптера; null — все физические
+  String? adapterName; // имя для показа, если адаптер сейчас не подключён
   Schedule schedule = const Schedule();
   bool sounds = true;
   bool hotkey = true;
+  bool checkUpdates = true;
+  Hotkey hotkeyKey = Hotkey.fallback;
   int accent = 0;
   String? language; // null — язык системы
   bool wasActive = false;
@@ -25,10 +72,15 @@ class Settings {
     'keepDisplay': keepDisplay,
     'until': until.name,
     'timerMinutes': timerMinutes,
-    'processName': processName,
+    'processes': [for (final p in processes) p.toJson()],
+    'downloadKbps': downloadKbps,
+    'adapter': adapter,
+    'adapterName': adapterName,
     'schedule': schedule.toJson(),
     'sounds': sounds,
     'hotkey': hotkey,
+    'checkUpdates': checkUpdates,
+    'hotkeyKey': hotkeyKey.toJson(),
     'accent': accent,
     'language': language,
     'wasActive': wasActive,
@@ -40,10 +92,21 @@ class Settings {
     if (j['keepDisplay'] case bool v) s.keepDisplay = v;
     if (j['until'] case String v) s.until = Until.values.asNameMap()[v] ?? Until.always;
     if (j['timerMinutes'] case int v when timerPresets.contains(v)) s.timerMinutes = v;
-    if (j['processName'] case String v when v.isNotEmpty) s.processName = v;
+    if (j['processes'] case List v) {
+      s.processes = {for (final e in v) ?WatchedProcess.fromJson(e)}.take(maxWatched).toList();
+    } else if (j['processName'] case String v when v.isNotEmpty) {
+      s.processes = [WatchedProcess(v, null)]; // настройки версии 1.1
+    }
+    if (j['downloadKbps'] case int v when downloadPresets.contains(v)) s.downloadKbps = v;
+    if (j['adapter'] case String v when v.isNotEmpty) {
+      s.adapter = v;
+      s.adapterName = j['adapterName'] is String ? j['adapterName'] as String : v;
+    }
     s.schedule = Schedule.fromJson(j['schedule']);
     if (j['sounds'] case bool v) s.sounds = v;
     if (j['hotkey'] case bool v) s.hotkey = v;
+    if (j['checkUpdates'] case bool v) s.checkUpdates = v;
+    s.hotkeyKey = Hotkey.fromJson(j['hotkeyKey']);
     if (j['accent'] case int v when v >= 0 && v < accentPresets.length) s.accent = v;
     if (j['language'] case String v when v == 'ru' || v == 'en') s.language = v;
     if (j['wasActive'] case bool v) s.wasActive = v;

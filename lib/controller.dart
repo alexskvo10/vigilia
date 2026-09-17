@@ -2,15 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'hotkey.dart';
 import 'probes.dart' as probes;
 import 'schedule.dart';
 import 'settings.dart';
 import 'sounds.dart';
 import 'strings.dart';
 import 'theme.dart';
+import 'updater.dart';
 import 'win32.dart';
 
-export 'settings.dart' show Until, timerPresets;
+export 'hotkey.dart' show Hotkey;
+export 'settings.dart' show Until, WatchedProcess, downloadPresets, maxWatched, timerPresets;
 
 /// Почему режим выключился сам (для уведомления).
 enum Finish { timer, process, download, schedule }
@@ -18,7 +21,13 @@ enum Finish { timer, process, download, schedule }
 /// Почему не удалось включиться (подсказка в статусе).
 enum Notice { none, pickProcess, notRunning }
 
-const downloadThreshold = 100 * 1024; // байт/с
+/// Подпись списка программ: «obs64.exe» или «obs64.exe +2».
+String processesLabel(List<WatchedProcess> list) => switch (list.length) {
+  0 => '',
+  1 => list.first.name,
+  _ => '${list.first.name} +${list.length - 1}',
+};
+
 const downloadQuiet = Duration(minutes: 2);
 
 /// Единственный источник правды о состоянии приложения.
@@ -33,58 +42,75 @@ class VigilController extends ChangeNotifier {
     required this.store,
     required this.autostartService,
     DateTime Function()? now,
-    bool Function(String name)? processRunning,
-    Future<int?> Function()? receivedBytes,
+    List<WatchedProcess> Function(List<WatchedProcess>)? runningWatched,
+    Map<String, int> Function(String? adapter)? receivedCounters,
     this.registerHotkey,
     this.releaseMode = kReleaseMode,
-  }) : _now = now ?? DateTime.now,
-       _processRunning = processRunning ?? probes.isProcessRunning,
-       _receivedBytes = receivedBytes ?? probes.receivedBytes;
+    Updater? updater,
+  }) : updater = updater ?? Updater(current: appVersion),
+       _now = now ?? DateTime.now,
+       _runningWatched = runningWatched ?? probes.runningWatched,
+       _receivedCounters = receivedCounters ?? probes.receivedCounters;
 
   final PowerRequest power;
   final Sounds sounds;
   final SettingsStore store;
   final Autostart autostartService;
   final DateTime Function() _now;
-  final bool Function(String) _processRunning;
-  final Future<int?> Function() _receivedBytes;
+  final List<WatchedProcess> Function(List<WatchedProcess>) _runningWatched;
+  final Map<String, int> Function(String?) _receivedCounters;
 
   /// Регистрация глобальной клавиши; возвращает, удалось ли. null — без клавиши (тесты).
-  Future<bool> Function(bool on)? registerHotkey;
+  Future<bool> Function(bool on, Hotkey key)? registerHotkey;
   final bool releaseMode;
+  final Updater updater;
 
   /// Сообщение о самостоятельном выключении (Shell показывает уведомление).
-  void Function(Finish reason, String? detail)? onFinished;
+  void Function(Finish reason)? onFinished;
 
   final clock = ValueNotifier<int>(0);
 
   Settings _s = Settings();
   bool _manual = false, _scheduled = false, _error = false, _autostart = false, _hotkeyActive = false;
-  bool _disposed = false, _probing = false;
+  bool _disposed = false, _recording = false;
   Notice _notice = Notice.none;
   DateTime? _windowEnd, _skipUntil, _endsAt, _lastAt, _quietSince;
   Duration _total = Duration.zero;
-  int? _lastBytes;
+  Map<String, int>? _lastBytes;
   double? _speed;
-  Timer? _ticker;
+  Timer? _ticker, _updateTimer;
 
   bool get active => _manual || _scheduled;
   bool get manual => _manual;
   bool get scheduled => _scheduled && !_manual;
   DateTime? get windowEnd => _windowEnd;
+  DateTime get now => _now();
+
+  /// Начало следующего окна расписания (подсказка, пока режим выключен).
+  DateTime? get nextWindow => _s.schedule.nextStart(_now());
   bool get error => _error;
   Notice get notice => _notice;
   bool get keepDisplay => _s.keepDisplay;
   Until get until => _s.until;
   int get timerMinutes => _s.timerMinutes;
-  String? get processName => _s.processName;
+  List<WatchedProcess> get processes => List.unmodifiable(_s.processes);
   Schedule get schedule => _s.schedule;
   bool get soundsOn => _s.sounds;
   bool get autostart => _autostart;
   bool get hotkey => _s.hotkey;
-  bool get hotkeyBusy => _s.hotkey && registerHotkey != null && !_hotkeyActive;
+  bool get checkUpdates => _s.checkUpdates;
+  Hotkey get hotkeyKey => _s.hotkeyKey;
+
+  /// Сочетание зарегистрировано в Windows (без регистратора — как в настройках).
+  /// Во время записи нового сочетания показывает прежнее состояние.
+  bool get hotkeyActive => registerHotkey == null ? _s.hotkey : _hotkeyActive;
+  bool get hotkeyBusy => _s.hotkey && registerHotkey != null && !_hotkeyActive && !_recording;
   int get accent => _s.accent;
   String? get language => _s.language;
+  int get downloadKbps => _s.downloadKbps;
+  int get downloadThreshold => _s.downloadKbps * 1024; // байт/с
+  String? get adapter => _s.adapter;
+  String? get adapterName => _s.adapterName;
   DateTime? get endsAt => _manual && _s.until == Until.timer ? _endsAt : null;
 
   /// Скорость загрузки, байт/с (null — ещё нет двух отсчётов).
@@ -130,11 +156,34 @@ class VigilController extends ChangeNotifier {
     // путь автозапуска обновляем только у настоящей сборки, не у debug/тестов
     if (releaseMode) await autostartService.refresh();
     final auto = await autostartService.isEnabled();
-    final hk = _s.hotkey && registerHotkey != null ? await registerHotkey!(true) : false;
     if (_disposed) return;
     _autostart = auto;
-    _hotkeyActive = hk;
-    notifyListeners();
+    await _registerHotkey();
+    _scheduleUpdateChecks();
+  }
+
+  /// Автопроверка обновлений: вскоре после старта и дальше раз в 12 часов.
+  /// Только у настоящей сборки — debug и тесты в сеть не ходят.
+  void _scheduleUpdateChecks() {
+    _updateTimer?.cancel();
+    _updateTimer = null;
+    if (!releaseMode || !_s.checkUpdates || _disposed) return;
+    _updateTimer = Timer(const Duration(seconds: 10), () {
+      unawaited(updater.check());
+      _updateTimer = Timer.periodic(const Duration(hours: 12), (_) => unawaited(updater.check()));
+    });
+  }
+
+  /// Проверка при открытии раздела «Система», если давно не проверяли.
+  void checkUpdatesSoon() {
+    if (releaseMode && _s.checkUpdates) unawaited(updater.check(ifOlderThan: const Duration(minutes: 10)));
+  }
+
+  void setCheckUpdates(bool v) {
+    _s.checkUpdates = v;
+    _changed();
+    _scheduleUpdateChecks();
+    if (v) unawaited(updater.check());
   }
 
   // ---------- вкл/выкл ----------
@@ -177,9 +226,8 @@ class VigilController extends ChangeNotifier {
 
   Notice _conditionProblem() {
     if (_s.until != Until.process) return Notice.none;
-    final name = _s.processName;
-    if (name == null) return Notice.pickProcess;
-    return _processRunning(name) ? Notice.none : Notice.notRunning;
+    if (_s.processes.isEmpty) return Notice.pickProcess;
+    return _runningWatched(_s.processes).isEmpty ? Notice.notRunning : Notice.none;
   }
 
   void _startCondition() {
@@ -223,7 +271,7 @@ class VigilController extends ChangeNotifier {
     store.save(_s);
   }
 
-  void _finish(Finish reason, [String? detail]) {
+  void _finish(Finish reason) {
     _manual = false;
     _stopCondition();
     _apply();
@@ -232,7 +280,7 @@ class VigilController extends ChangeNotifier {
     _syncTicker();
     notifyListeners();
     // если окно расписания продолжается, компьютер всё ещё бодрствует — уведомлять не о чем
-    if (!active) onFinished?.call(reason, detail);
+    if (!active) onFinished?.call(reason);
   }
 
   // ---------- тик ----------
@@ -259,10 +307,10 @@ class VigilController extends ChangeNotifier {
       case Until.timer:
         if (remaining == Duration.zero) _finish(Finish.timer);
       case Until.process:
-        final name = _s.processName;
-        if (clock.value % 5 == 0 && name != null && !_processRunning(name)) _finish(Finish.process, name);
+        // все отслеживаемые программы завершились
+        if (clock.value % 5 == 0 && _runningWatched(_s.processes).isEmpty) _finish(Finish.process);
       case Until.download:
-        if (clock.value % 3 == 0) unawaited(sampleDownload());
+        if (clock.value % 2 == 0) sampleDownload();
     }
   }
 
@@ -281,33 +329,27 @@ class VigilController extends ChangeNotifier {
     _apply();
     if (active != wasActive) {
       sounds.play(active ? Sfx.on : Sfx.done);
-      if (!active) onFinished?.call(Finish.schedule, null);
+      if (!active) onFinished?.call(Finish.schedule);
     }
     notifyListeners();
     return true;
   }
 
   @visibleForTesting
-  Future<void> sampleDownload() async {
-    if (_probing) return;
-    _probing = true;
-    try {
-      final bytes = await _receivedBytes();
-      if (_disposed || !_manual || _s.until != Until.download || bytes == null) return;
-      final now = _now();
-      final last = _lastBytes, lastAt = _lastAt;
-      _lastBytes = bytes;
-      _lastAt = now;
-      if (last == null || lastAt == null) return;
-      _speed = probes.bytesPerSecond(last, bytes, now.difference(lastAt));
-      if (_speed! >= downloadThreshold) {
-        _quietSince = null;
-      } else {
-        _quietSince ??= now;
-        if (now.difference(_quietSince!) >= downloadQuiet) _finish(Finish.download);
-      }
-    } finally {
-      _probing = false;
+  void sampleDownload() {
+    if (_disposed || !_manual || _s.until != Until.download) return;
+    final bytes = _receivedCounters(_s.adapter);
+    final now = _now();
+    final last = _lastBytes, lastAt = _lastAt;
+    _lastBytes = bytes;
+    _lastAt = now;
+    if (last == null || lastAt == null) return;
+    _speed = probes.bytesPerSecond(last, bytes, now.difference(lastAt));
+    if (_speed! >= downloadThreshold) {
+      _quietSince = null;
+    } else {
+      _quietSince ??= now;
+      if (now.difference(_quietSince!) >= downloadQuiet) _finish(Finish.download);
     }
   }
 
@@ -338,8 +380,28 @@ class VigilController extends ChangeNotifier {
     _s.until == Until.timer ? _conditionChanged() : _changed();
   }
 
-  void setProcess(String name) {
-    _s.processName = name;
+  void setDownloadKbps(int kbps) {
+    if (kbps == _s.downloadKbps) return;
+    _s.downloadKbps = kbps;
+    if (_manual && _s.until == Until.download) _quietSince = _now(); // новый порог — отсчёт тишины заново
+    _changed();
+  }
+
+  /// Адаптер для режима «загрузка»; null — все физические.
+  void setAdapter(String? guid, String? name) {
+    if (guid == _s.adapter) return;
+    _s.adapter = guid;
+    _s.adapterName = guid == null ? null : name;
+    _s.until == Until.download ? _conditionChanged() : _changed();
+  }
+
+  /// Добавить программу в список отслеживаемых или убрать из него.
+  void toggleProcess(WatchedProcess p) {
+    final list = _s.processes;
+    if (!list.remove(p)) {
+      if (list.length >= maxWatched) return;
+      list.add(p);
+    }
     if (_notice == Notice.pickProcess) _notice = Notice.none;
     _s.until == Until.process ? _conditionChanged() : _changed();
   }
@@ -402,9 +464,33 @@ class VigilController extends ChangeNotifier {
   Future<void> setHotkey(bool v) async {
     _s.hotkey = v;
     _changed();
-    final ok = registerHotkey == null ? false : await registerHotkey!(v);
+    await _registerHotkey();
+  }
+
+  /// Новое сочетание; заодно включает клавишу.
+  Future<void> setHotkeyKey(Hotkey key) async {
+    _s
+      ..hotkeyKey = key
+      ..hotkey = true;
+    _recording = false;
+    _changed();
+    await _registerHotkey();
+  }
+
+  /// Пока пользователь нажимает новое сочетание, старое снято: иначе Windows перехватит его до окна.
+  Future<void> recordHotkey(bool on) async {
+    if (on == _recording) return;
+    _recording = on;
+    notifyListeners();
+    await _registerHotkey();
+  }
+
+  /// Приводит регистрацию в Windows к настройкам.
+  Future<void> _registerHotkey() async {
+    final on = _s.hotkey && !_recording;
+    final ok = registerHotkey == null ? false : await registerHotkey!(on, _s.hotkeyKey);
     if (_disposed) return;
-    _hotkeyActive = ok;
+    if (!_recording) _hotkeyActive = on && ok; // снятие на время записи — не «выключено»
     notifyListeners();
   }
 
@@ -412,6 +498,8 @@ class VigilController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _ticker?.cancel();
+    _updateTimer?.cancel();
+    updater.dispose();
     power.dispose();
     clock.dispose();
     super.dispose();

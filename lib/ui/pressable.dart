@@ -1,4 +1,5 @@
 import 'package:flutter/gestures.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -16,6 +17,19 @@ void trackKeyboardMode() {
   GestureBinding.instance.pointerRouter.addGlobalRoute((e) {
     if (e is PointerDownEvent) keyboardMode.value = false;
   });
+}
+
+/// Фокус переживает пересоздание экрана (смена цвета/языка): кнопки с одинаковым
+/// [Pressable.focusTag] в старом и новом дереве считаются одной и той же кнопкой.
+String? _focusMemory; // тег последней сфокусированной кнопки (null — кнопка без тега)
+String? _focusRestore; // тег, который нужно сфокусировать в только что построенном дереве
+
+/// Вызывается перед постройкой нового экрана: фокус перейдёт к кнопке с тем же тегом,
+/// а если фокус был на кнопке без тега — к глазу.
+void restoreFocusOnRebuild() {
+  _focusRestore = _focusMemory ?? 'orb';
+  // новые кнопки создаются в этом же кадре; после него запрос не действует
+  SchedulerBinding.instance.addPostFrameCallback((_) => _focusRestore = null);
 }
 
 typedef PressBuilder = Widget Function(BuildContext context, bool hovered, bool pressed);
@@ -37,6 +51,7 @@ class Pressable extends StatefulWidget {
     this.hoverScale = 1.0,
     this.pressScale = 1.0,
     this.focusNode,
+    this.focusTag,
     this.autofocus = false,
     this.semanticLabel,
     this.selected,
@@ -49,6 +64,7 @@ class Pressable extends StatefulWidget {
   final double pop, flash, hoverScale, pressScale;
   final int popUp, popDown, flashMs;
   final FocusNode? focusNode;
+  final String? focusTag;
   final bool autofocus;
   final String? semanticLabel;
   final bool? selected, toggled;
@@ -61,11 +77,18 @@ class _PressableState extends State<Pressable> with TickerProviderStateMixin {
   late final _pop = AnimationController(vsync: this);
   late final _flash = AnimationController(vsync: this);
   bool _hovered = false, _pressed = false, _focusRing = false;
+  FocusNode? _ownNode;
+  FocusNode get _node => widget.focusNode ?? (_ownNode ??= FocusNode());
 
   @override
   void initState() {
     super.initState();
     _syncDurations();
+    if (widget.focusTag != null && widget.focusTag == _focusRestore) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _node.requestFocus();
+      });
+    }
   }
 
   @override
@@ -83,6 +106,7 @@ class _PressableState extends State<Pressable> with TickerProviderStateMixin {
   void dispose() {
     _pop.dispose();
     _flash.dispose();
+    _ownNode?.dispose();
     super.dispose();
   }
 
@@ -109,8 +133,11 @@ class _PressableState extends State<Pressable> with TickerProviderStateMixin {
       selected: widget.selected,
       toggled: widget.toggled,
       child: FocusableActionDetector(
-        focusNode: widget.focusNode,
+        focusNode: _node,
         autofocus: widget.autofocus,
+        onFocusChange: (v) {
+          if (v) _focusMemory = widget.focusTag;
+        },
         mouseCursor: SystemMouseCursors.click,
         onShowHoverHighlight: (v) => setState(() => _hovered = v),
         onShowFocusHighlight: (v) => setState(() => _focusRing = v),

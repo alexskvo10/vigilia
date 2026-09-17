@@ -1,3 +1,5 @@
+import 'dart:io' show pid;
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -6,18 +8,20 @@ import '../schedule.dart';
 import '../sounds.dart';
 import '../strings.dart';
 import '../theme.dart';
+import '../updater.dart';
+import '../win32.dart';
 import 'motion.dart';
 import 'orb.dart';
 import 'pages.dart';
+import 'pressable.dart';
 import 'settings_drawer.dart';
 import 'title_bar.dart';
-
-const appVersion = '1.1.0';
 
 /// Состояние интерфейса, которое переживает пересоздание экрана (смена цвета/языка).
 class UiState {
   final settings = ValueNotifier(false); // панель настроек по умолчанию скрыта
   final page = ValueNotifier(SettingsPage.mode);
+  String? screenKey; // цвет/язык последнего построенного экрана
 }
 
 /// Экран целиком. Смена цвета или языка пересоздаёт его с кроссфейдом:
@@ -32,16 +36,22 @@ class VigiliaScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: c,
-    builder: (context, _) => AnimatedSwitcher(
-      duration: D.settle,
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
-      child: DefaultTextStyle(
-        key: ValueKey('${c.accent}/${S.current.code}'),
-        style: mono(12),
-        child: Home(c: c, ui: ui, onHide: onHide),
-      ),
-    ),
+    builder: (context, _) {
+      final key = '${c.accent}/${S.current.code}';
+      // экран пересоздаётся — фокус переходит к той же кнопке нового экрана
+      if (ui.screenKey != null && ui.screenKey != key) restoreFocusOnRebuild();
+      ui.screenKey = key;
+      return AnimatedSwitcher(
+        duration: D.settle,
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        child: DefaultTextStyle(
+          key: ValueKey(key),
+          style: mono(12),
+          child: Home(c: c, ui: ui, onHide: onHide),
+        ),
+      );
+    },
   );
 }
 
@@ -65,7 +75,7 @@ class _HomeState extends State<Home> {
   void _toggleSettings() {
     widget.c.sounds.play(Sfx.tick);
     ui.settings.value = !ui.settings.value;
-    if (!ui.settings.value && ui.page.value == SettingsPage.picker) ui.page.value = SettingsPage.mode;
+    if (!ui.settings.value && ui.page.value.isSub) ui.page.value = SettingsPage.mode;
   }
 
   void _setPage(SettingsPage p) {
@@ -74,9 +84,9 @@ class _HomeState extends State<Home> {
     ui.page.value = p;
   }
 
-  // Esc: выбор процесса → раздел «Режим» → закрыть настройки → спрятать окно
+  // Esc: выбор процесса/адаптера → раздел «Режим» → закрыть настройки → спрятать окно
   void _escape() {
-    if (ui.settings.value && ui.page.value == SettingsPage.picker) {
+    if (ui.settings.value && ui.page.value.isSub) {
       _setPage(SettingsPage.mode);
     } else if (ui.settings.value) {
       _toggleSettings();
@@ -98,7 +108,10 @@ class _HomeState extends State<Home> {
       bindings: {const SingleActivator(LogicalKeyboardKey.escape): _escape},
       child: MouseRegion(
         onHover: (e) => _pointer.value = e.position,
-        onExit: (_) => _pointer.value = null,
+        // ложный «уход» при клике (курсор на месте) глаз не сбрасывает
+        onExit: (_) {
+          if (!cursorOverOwnWindow(pid)) _pointer.value = null;
+        },
         child: ColoredBox(
           color: C.base,
           child: ListenableBuilder(
@@ -223,21 +236,27 @@ class Status extends StatelessWidget {
 
   /// (ключ для анимации смены, текст, предупреждение ли)
   static (String, String, bool) subtitle(VigilController c, S s) {
-    final name = c.processName ?? '';
+    final procs = c.processes;
+    final one = procs.length == 1 ? procs.first.name : null;
     final quiet = c.quietLeft, speed = c.speed, left = c.remaining, end = c.endsAt, win = c.windowEnd;
     if (c.error) return ('err', s.subError, false);
     if (!c.active) {
       return switch (c.notice) {
         Notice.pickProcess => ('notice', s.pickProcessFirst, true),
-        Notice.notRunning => ('notice', s.notRunning(name), true),
-        Notice.none => ('off', s.subOff, false),
+        Notice.notRunning => ('notice', one != null ? s.notRunning(one) : s.notRunningAny, true),
+        Notice.none => switch (c.nextWindow) {
+          final next? => ('next', s.nextWindow(whenText(next, c.now, s)), false),
+          null => ('off', s.subOff, false),
+        },
       };
     }
     if (c.scheduled && win != null) return ('schedule', s.onSchedule(hhmm(win)), false);
     if (left != null && end != null) return ('timer', s.left(clockText(left), hhmm(end)), false);
-    if (c.manual && c.until == Until.process) return ('process', s.whileRunning(name), false);
+    if (c.manual && c.until == Until.process) {
+      return ('process', one != null ? s.whileRunning(one) : s.whileRunningMany(procs.length), false);
+    }
     if (c.manual && c.until == Until.download) {
-      final idle = quiet != null && (speed == null || speed < downloadThreshold);
+      final idle = quiet != null && (speed == null || speed < c.downloadThreshold);
       return idle
           ? ('idle', s.downloadIdle(clockText(quiet)), false)
           : ('download', s.download(speedText(speed ?? 0, s)), false);

@@ -13,11 +13,13 @@ class Toggle extends StatelessWidget {
     required this.onChanged,
     this.icon,
     this.hint,
+    this.hintWidget,
     this.warn = false,
   });
 
   final String label;
   final String? hint; // мелкая подпись под названием
+  final Widget? hintWidget; // или виджет вместо неё (например, сочетание клавиш)
   final bool warn; // подпись — предупреждение
   final IconData? icon;
   final bool value;
@@ -36,7 +38,7 @@ class Toggle extends StatelessWidget {
       onTap: () => onChanged(!value),
       builder: (context, hovered, _) => AnimatedContainer(
         duration: D.color,
-        height: 40,
+        height: hintWidget == null ? 40 : 50,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: hovered ? C.text.withValues(alpha: 0.05) : C.text.withValues(alpha: 0),
@@ -56,7 +58,13 @@ class Toggle extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label, style: mono(12, color: value ? C.text : C.subtext0)),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: mono(12, color: value ? C.text : C.subtext0),
+                  ),
+                  if (hintWidget != null) Padding(padding: const EdgeInsets.only(top: 3), child: hintWidget),
                   if (hint != null)
                     Text(
                       hint!,
